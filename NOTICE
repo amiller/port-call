@@ -13,7 +13,6 @@ in-file comment explaining what was changed and the measurement that motivated i
   patches/gmeet-selectors.ts       <- core/meetings/modules/join/src/googlemeet/selectors.ts
       removed bare [role="alert"] / [role="alertdialog"] from googleRemovalIndicators: any Meet
       toast (including "you're presenting") was read as a host eviction.
-  patches/remote-browser-args.ts   <- core/meetings/modules/remote-browser/src/args.ts
   patches/bot-index.ts             <- core/meetings/services/bot/src/index.ts
       wired the new acts, teed the transcript into the camera HUD, and made surface controllers
       hot-reloadable via per-act dynamic import.

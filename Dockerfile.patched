@@ -36,7 +36,6 @@ RUN cd /app/core/meetings/modules/gmeet-capture && /app/node_modules/.bin/tsc \
 #    measurement and what was ruled out) — tab capture is the path that does.
 COPY patches/browser-args.ts /app/core/meetings/modules/join/src/browser-args.ts
 COPY patches/gmeet-selectors.ts /app/core/meetings/modules/join/src/googlemeet/selectors.ts
-COPY patches/remote-browser-args.ts /app/core/meetings/modules/remote-browser/src/args.ts
 COPY patches/bot-contracts.ts /app/core/meetings/services/bot/src/contracts.ts
 COPY patches/bot-screen-share.ts /app/core/meetings/services/bot/src/screen-share.ts
 COPY patches/bot-capture-bridge.ts /app/core/meetings/services/bot/src/capture-bridge.ts
@@ -50,8 +49,6 @@ COPY patches/bot-reactions.ts /app/core/meetings/services/bot/src/reactions.ts
 COPY patches/bot-selfcheck.ts /app/core/meetings/services/bot/src/selfcheck.ts
 COPY patches/bot-index.ts /app/core/meetings/services/bot/src/index.ts
 
-RUN cd /app/core/meetings/modules/remote-browser && /app/node_modules/.bin/tsc \
-    || (echo "remote-browser: tsc failed" && exit 1)
 RUN cd /app/core/meetings/modules/join && /app/node_modules/.bin/tsc \
  && grep -q auto-select-tab-capture-source-by-title dist/browser-args.js \
  && ! grep -qE "^\s*'\[role=\"alert(dialog)?\"\]'," dist/googlemeet/selectors.js \
