@@ -1,0 +1,25 @@
+# The two sidecars the bot talks to: transcription (-> near.ai TEE) and TTS (-> local Piper).
+#
+# On the laptop these ran as host processes reached via host.docker.internal. A dstack pod has no
+# host to run them on, so they get containerized — same artifact on laptop / fractal / CVM, wired
+# by compose service name instead of host.docker.internal.
+FROM python:3.12-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends espeak ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
+
+# python-multipart is required by near-shim's UploadFile form parsing — FastAPI raises at
+# request time, not import time, so a missing one only surfaces as a crash-loop under load.
+RUN pip install --no-cache-dir fastapi "uvicorn[standard]" httpx piper-tts python-multipart
+
+# Bake the voice in so the container is self-contained and starts offline (~63MB).
+ENV PIPER_MODEL=/opt/piper/en_US-lessac-medium.onnx
+RUN mkdir -p /opt/piper && cd /opt/piper \
+ && python3 -m piper.download_voices en_US-lessac-medium
+
+WORKDIR /app
+COPY near-shim.py tts-shim.py ./
+COPY sfx/ ./sfx/
+ENV PIPER_BIN=piper SFX_DIR=/app/sfx SHIM_LOG=metrics
+EXPOSE 8001 8002

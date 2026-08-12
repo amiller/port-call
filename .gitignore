@@ -1,0 +1,8 @@
+live/
+artifacts/
+*.mp4
+*.png
+__pycache__/
+*.pyc
+.env
+*token*.json

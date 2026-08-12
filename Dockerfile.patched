@@ -1,0 +1,66 @@
+# vexa-lite + our patches.
+#
+# 1. VOICE AGENT. v0.12 declares `voiceAgentEnabled` in the sealed invocation schema and gates the
+#    bot's SPEAK path on it, but meeting-api never populates it — so speak is unreachable for every
+#    bot it spawns. These three files thread `voice_agent_enabled` from the POST /bots body exactly
+#    the way `bot_name` is already threaded. No contract change; the schema already allows it.
+#
+# 2. GOOGLE MEET CHAT READER. Vexa ships chat readers for Zoom and Teams but none for Meet, and
+#    they aren't wired to anything. gmeet-chat.ts is a port of teams-chat.ts that prefers Meet's
+#    real data-* attributes over obfuscated classes. Getting it into the page bundle takes three
+#    steps, all of which must happen at image build time or a container restart silently reverts
+#    to a bundle without it:
+#      a. drop the module in and export it from the package index;
+#      b. `tsc` the package — build-browser-utils.mjs reads each brick's built dist/, not src/;
+#      c. rebuild the IIFE bundle, whose export list is enumerated by hand in that script.
+FROM vexaai/vexa-lite:latest
+
+COPY patches/invocation.py patches/service.py patches/router.py \
+     /app/meeting-api/src/meeting_api/bot_spawn/
+
+COPY patches/gmeet-chat.ts /app/core/meetings/modules/gmeet-capture/src/gmeet-chat.ts
+COPY patches/gmeet-capture-index.ts /app/core/meetings/modules/gmeet-capture/src/index.ts
+COPY patches/build-browser-utils.mjs /app/core/meetings/services/bot/build-browser-utils.mjs
+
+RUN cd /app/core/meetings/modules/gmeet-capture && /app/node_modules/.bin/tsc \
+ && cd /app/core/meetings/services/bot && node build-browser-utils.mjs \
+ && grep -q createGmeetChat dist/browser-utils.global.js \
+    || (echo "chat reader missing from bundle" && exit 1)
+
+# 3. SCREENSHARE (tab capture). acts.v1 declares eleven actions and the image implements two
+#    (speak / speak_stop); screen_share joins them at the same seam. The bot opens a stage tab
+#    titled VEXA-STAGE and clicks Meet's Present control with Playwright (a trusted event —
+#    getDisplayMedia refuses a click dispatched from page JS), and Chrome answers its own tab
+#    picker from the launch flag added to @vexa/join's browser-args.
+#    X11 desktop capture does NOT work in this image (see the comment in browser-args.ts for the
+#    measurement and what was ruled out) — tab capture is the path that does.
+COPY patches/browser-args.ts /app/core/meetings/modules/join/src/browser-args.ts
+COPY patches/gmeet-selectors.ts /app/core/meetings/modules/join/src/googlemeet/selectors.ts
+COPY patches/remote-browser-args.ts /app/core/meetings/modules/remote-browser/src/args.ts
+COPY patches/bot-contracts.ts /app/core/meetings/services/bot/src/contracts.ts
+COPY patches/bot-screen-share.ts /app/core/meetings/services/bot/src/screen-share.ts
+COPY patches/bot-capture-bridge.ts /app/core/meetings/services/bot/src/capture-bridge.ts
+# The unofficial Meet API surfaces: chat, camera (canvas via getUserMedia), screenshare (same
+# canvas via getDisplayMedia — Chrome's picker is never reached), reactions, and the selfcheck
+# act the e2e harness reads. These are hot-swappable via ./hotswap.sh during development; they
+# are baked here so a rebuilt image is not silently missing them.
+COPY patches/bot-chat.ts /app/core/meetings/services/bot/src/chat.ts
+COPY patches/bot-camera.ts /app/core/meetings/services/bot/src/camera.ts
+COPY patches/bot-reactions.ts /app/core/meetings/services/bot/src/reactions.ts
+COPY patches/bot-selfcheck.ts /app/core/meetings/services/bot/src/selfcheck.ts
+COPY patches/bot-index.ts /app/core/meetings/services/bot/src/index.ts
+
+RUN cd /app/core/meetings/modules/remote-browser && /app/node_modules/.bin/tsc \
+    || (echo "remote-browser: tsc failed" && exit 1)
+RUN cd /app/core/meetings/modules/join && /app/node_modules/.bin/tsc \
+ && grep -q auto-select-tab-capture-source-by-title dist/browser-args.js \
+ && ! grep -qE "^\s*'\[role=\"alert(dialog)?\"\]'," dist/googlemeet/selectors.js \
+    || (echo "join dist: tab-capture flag missing, or bare role=alert still a removal indicator" && exit 1)
+RUN cd /app/core/meetings/services/bot && /app/node_modules/.bin/tsc \
+ && grep -q screen_share dist/contracts.js \
+ && grep -q createScreenShareController dist/index.js \
+ && grep -q grantPermissions dist/capture-bridge.js \
+ && grep -q getDisplayMedia dist/camera.js \
+ && grep -q createChatController dist/chat.js \
+ && grep -q createReactionController dist/reactions.js \
+    || (echo "screen_share missing from bot dist" && exit 1)

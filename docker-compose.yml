@@ -1,0 +1,81 @@
+# The whole rig, portable across laptop / fractal / dstack pod.
+#
+#   NEAR_API_KEY=... docker compose up -d --build
+#
+# Why this exists: the laptop ran the shims as host processes reached via host.docker.internal.
+# A CVM has no host to put them on, so everything is a service and the bot reaches them by
+# compose service name. Nothing here depends on where it runs.
+#
+# Resource notes (measured on the laptop, 2026-08-10): a bot in a meeting costs ~1.4GB RSS and
+# ~0.6 core steady, spiking to ~2.3 cores while Chromium starts. Size the host by concurrent
+# meetings, not by this file. `max_concurrent_bots` is set per-user at the admin API.
+services:
+  postgres:
+    image: postgres:17-alpine
+    command: -c idle_in_transaction_session_timeout=60000
+    environment:
+      POSTGRES_DB: vexa
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vexa"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  near-shim:
+    build: {context: ., dockerfile: Dockerfile.shims}
+    image: vexa-shims:local
+    command: uvicorn near-shim:app --host 0.0.0.0 --port 8001
+    volumes: [./near-shim.py:/app/near-shim.py:ro]
+    environment:
+      NEAR_API_KEY: ${NEAR_API_KEY:?set NEAR_API_KEY}
+      SHIM_LOG: metrics          # content-free diagnostics; "text" also logs transcripts
+    restart: unless-stopped
+
+  tts-shim:
+    build: {context: ., dockerfile: Dockerfile.shims}
+    image: vexa-shims:local
+    command: uvicorn tts-shim:app --host 0.0.0.0 --port 8002
+    volumes: [./tts-shim.py:/app/tts-shim.py:ro, ./sfx:/app/sfx:ro]
+    environment:
+      TTS_ENGINE: ${TTS_ENGINE:-piper}
+    restart: unless-stopped
+
+  vexa-lite:
+    build: {context: ., dockerfile: Dockerfile.patched}
+    image: vexa-lite:patched
+    shm_size: 2gb
+    depends_on:
+      postgres: {condition: service_healthy}
+    ports:
+      - "8056:8056"     # gateway (the only front door)
+      - "3000:3000"
+    volumes:
+      - recordings:/var/lib/vexa/recordings
+      # Hot-swap: edit TS on the host, `./hotswap.sh`, spawn a new bot. ~10s instead of a 5-minute
+      # image rebuild + compose restart. Bots are per-meeting processes, so live bots are undisturbed.
+      - ./live/services-bot-src:/app/core/meetings/services/bot/src
+      - ./live/services-bot-dist:/app/core/meetings/services/bot/dist
+      - ./live/modules-join-src:/app/core/meetings/modules/join/src
+      - ./live/modules-join-dist:/app/core/meetings/modules/join/dist
+    environment:
+      # DB_HOST defaulting to "localhost" while postgres is a separate container is what silently
+      # crash-looped admin-api and meeting-api for days. Never let this go unset.
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vexa
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_SSL_MODE: disable
+      ADMIN_API_TOKEN: ${ADMIN_TOKEN:-devadmintoken123}
+      TRANSCRIPTION_SERVICE_URL: http://near-shim:8001/v1/audio/transcriptions
+      TRANSCRIPTION_SERVICE_TOKEN: near
+      TTS_SERVICE_URL: http://tts-shim:8002
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  recordings:

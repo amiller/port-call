@@ -1,0 +1,30 @@
+vexa-poc
+Copyright 2026 Andrew Miller
+
+This product includes software developed by the Vexa project
+(https://github.com/Vexa-ai/vexa), licensed under the Apache License, Version 2.0.
+
+The following files in patches/ are MODIFIED copies of Vexa source files. Each carries an
+in-file comment explaining what was changed and the measurement that motivated it.
+
+  patches/browser-args.ts          <- core/meetings/modules/join/src/browser-args.ts
+      added a window size (Meet hides the chat button at narrow widths) and notes on the
+      --use-fake-ui-for-media-stream / getDisplayMedia conflict.
+  patches/gmeet-selectors.ts       <- core/meetings/modules/join/src/googlemeet/selectors.ts
+      removed bare [role="alert"] / [role="alertdialog"] from googleRemovalIndicators: any Meet
+      toast (including "you're presenting") was read as a host eviction.
+  patches/remote-browser-args.ts   <- core/meetings/modules/remote-browser/src/args.ts
+  patches/bot-index.ts             <- core/meetings/services/bot/src/index.ts
+      wired the new acts, teed the transcript into the camera HUD, and made surface controllers
+      hot-reloadable via per-act dynamic import.
+  patches/bot-contracts.ts         <- core/meetings/services/bot/src/contracts.ts
+      added screen_share, screen_share_stop, camera_show, camera_off, reaction, selfcheck to acts.v1.
+  patches/bot-capture-bridge.ts    <- core/meetings/services/bot/src/capture-bridge.ts
+      install the camera init-script at launch; grant camera/mic over CDP.
+  patches/invocation.py, service.py, router.py  <- meeting-api bot_spawn/
+      thread voice_agent_enabled from the POST /bots body, as bot_name already is.
+
+New files (not derived from Vexa, Apache-2.0):
+  patches/bot-chat.ts, bot-camera.ts, bot-reactions.ts, bot-screen-share.ts, bot-selfcheck.ts
+  patches/gmeet-chat.ts, gmeet-capture-index.ts
+  probe/, shims/, and the top-level scripts.
