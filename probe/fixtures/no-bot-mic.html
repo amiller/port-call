@@ -1,0 +1,52 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Negative Fixture — Bot's own mic button absent (should FAIL, not grab tile mute)</title>
+<!--
+  NEGATIVE TEST: what happens when the bot's OWN mic button is missing?
+  A naive document-wide query would incorrectly match a tile's "Mute Alice's microphone".
+  CORRECT behavior: selector FAILS loudly, throws "Element not found".
+-->
+<style>
+  body { background:#202124; color:#e8eaed; font:15px system-ui, sans-serif; margin:0; height:100vh }
+  #grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; padding:16px; padding-bottom:80px }
+  .tile { position:relative; width:100%; height:180px; background:#3c4043; border-radius:8px; overflow:hidden }
+  .tile video { width:100%; height:140px; object-fit:cover; background:#000 }
+  .tile-name { position:absolute; bottom:4px; left:8px; font-size:13px; color:#e8eaed; text-shadow:0 1px 3px rgba(0,0,0,0.8) }
+  .tile-controls { position:absolute; top:8px; right:8px; display:flex; gap:4px }
+  .tile-controls button { width:36px; height:36px; border-radius:50%; border:0; background:rgba(60,64,67,0.9); color:#e8eaed; cursor:pointer }
+  #toolbar { position:fixed; bottom:0; left:0; right:0; display:flex; gap:8px; justify-content:center; padding:14px; background:#202124; }
+  .toolbar-btn { background:#3c4043; color:#e8eaed; border:0; border-radius:24px; padding:12px 16px; cursor:pointer; min-width:48px }
+</style>
+
+<div id="grid">
+  <div class="tile" data-participant-id="p1">
+    <video autoplay></video>
+    <span class="tile-name">Alice Chen</span>
+    <div class="tile-controls">
+      <!-- This is NOT the bot's mic button — it's a tile hover control. -->
+      <button aria-label="Mute Alice Chen's microphone">🎤</button>
+    </div>
+  </div>
+
+  <div class="tile" data-participant-id="p2">
+    <video autoplay></video>
+    <span class="tile-name">Bob Smith</span>
+    <div class="tile-controls">
+      <button aria-label="Mute Bob Smith's microphone">🎤</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOOLBAR with NO mic button (simulating bot joined without mic permissions) -->
+<div id="toolbar">
+  <!-- NO mic button here! Only camera, share, etc. -->
+  <button class="toolbar-btn" aria-label="Turn on camera">camera</button>
+  <button class="toolbar-btn" aria-label="Share screen">screen share</button>
+  <button class="toolbar-btn" aria-label="Leave call">leave call</button>
+</div>
+
+<script>
+  window.__fixture_name = 'no-bot-mic';
+  // A scoped-and-verified selector should detect the absence and THROW.
+  // A naive "first match wins" would incorrectly click Alice's mute button.
+</script>

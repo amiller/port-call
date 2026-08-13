@@ -1,0 +1,172 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Populated Call Fixture — 5+ tiles with hover controls</title>
+<!--
+  A realistic Google Meet DOM fixture for testing selector behavior WITHOUT a real meeting.
+
+  This fixture encodes the EXACT DOM structure and aria-label patterns observed in real Meet,
+  including the 2026-08-12 bug: selector ambiguity where a document-wide query matches the WRONG
+  element (e.g., bot's own mic control vs a tile's "Mute Alice's microphone").
+
+  Every aria-label and data- attribute here was captured from a live meeting. Do NOT change
+  these without verifying against real Meet — the whole point is to catch drift.
+-->
+<style>
+  body { background:#202124; color:#e8eaed; font:15px system-ui, sans-serif; margin:0; height:100vh; overflow:hidden }
+  #grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; padding:16px; padding-bottom:80px }
+  .tile { position:relative; width:100%; height:180px; background:#3c4043; border-radius:8px; overflow:hidden }
+  .tile video { width:100%; height:140px; object-fit:cover; background:#000 }
+  .tile-name { position:absolute; bottom:4px; left:8px; font-size:13px; color:#e8eaed; text-shadow:0 1px 3px rgba(0,0,0,0.8) }
+  /* Tile hover controls — the AMBIGUITY ZONE. These appear on tile hover and contain buttons like
+     "Mute Alice's microphone" that a naive bot mic selector would match. */
+  .tile-controls { position:absolute; top:8px; right:8px; display:none; gap:4px }
+  .tile:hover .tile-controls { display:flex }
+  .tile-controls button { width:36px; height:36px; border-radius:50%; border:0; background:rgba(60,64,67,0.9); color:#e8eaed; cursor:pointer }
+  #toolbar { position:fixed; bottom:0; left:0; right:0; display:flex; gap:8px; justify-content:center; padding:14px; background:#202124; transition:opacity .2s; z-index:100 }
+  #toolbar.hidden { opacity:0; pointer-events:none }
+  .toolbar-btn { background:#3c4043; color:#e8eaed; border:0; border-radius:24px; padding:12px 16px; cursor:pointer; min-width:48px; font-size:14px }
+  /* Reaction picker — CLOSED by default, must OPEN before emoji entries resolve. */
+  #reaction-picker { position:fixed; bottom:70px; left:50%; transform:translateX(-50%); background:#292a2d; padding:10px; border-radius:12px; display:none; gap:8px; z-index:200 }
+  #reaction-picker.open { display:flex }
+  #reaction-picker button { width:48px; height:48px; border-radius:50%; border:0; background:#3c4043; cursor:pointer; font-size:24px }
+  /* Consent dialog — appears AFTER admission for Gemini "take notes for me". */
+  #consent-dialog { position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#292a2d; padding:24px; border-radius:12px; display:none; z-index:300; max-width:400px }
+  #consent-dialog.open { display:block }
+  #consent-dialog h2 { margin:0 0 16px 0; font-size:18px }
+  #consent-dialog p { margin:0 0 20px 0; line-height:1.4 }
+  #consent-dialog button { background:#1a73e8; color:#fff; border:0; border-radius:4px; padding:10px 20px; cursor:pointer }
+</style>
+
+<div id="grid">
+  <!-- Bot's own tile — has "Turn on/off microphone" button in toolbar, NOT a tile mute control -->
+  <div class="tile" data-participant-id="p1" data-self-name="Vexa Bot">
+    <video muted autoplay></video>
+    <span class="tile-name">Vexa Bot</span>
+    <!-- Bot tile has NO hover controls in real Meet — mic/camera are toolbar-only for self -->
+  </div>
+
+  <!-- Other participants' tiles — EACH has "Mute <name>'s microphone" hover control.
+       This is the ambiguity that broke setMic on 2026-08-12. -->
+  <div class="tile" data-participant-id="p2">
+    <video autoplay></video>
+    <span class="tile-name">Alice Chen</span>
+    <div class="tile-controls">
+      <button aria-label="Mute Alice Chen's microphone">🎤</button>
+    </div>
+  </div>
+
+  <div class="tile" data-participant-id="p3">
+    <video autoplay></video>
+    <span class="tile-name">Bob Smith</span>
+    <div class="tile-controls">
+      <button aria-label="Mute Bob Smith's microphone">🎤</button>
+    </div>
+  </div>
+
+  <div class="tile" data-participant-id="p4">
+    <video autoplay></video>
+    <span class="tile-name">Carol Davis</span>
+    <div class="tile-controls">
+      <button aria-label="Mute Carol Davis's microphone">🎤</button>
+    </div>
+  </div>
+
+  <div class="tile" data-participant-id="p5">
+    <video autoplay></video>
+    <span class="tile-name">David Lee</span>
+    <div class="tile-controls">
+      <button aria-label="Mute David Lee's microphone">🎤</button>
+    </div>
+  </div>
+
+  <div class="tile" data-participant-id="p6">
+    <video autoplay></video>
+    <span class="tile-name">Eva Martinez</span>
+    <div class="tile-controls">
+      <button aria-label="Mute Eva Martinez's microphone">🎤</button>
+    </div>
+  </div>
+</div>
+
+<!-- BOTTOM TOOLBAR — contains bot's OWN controls (mic, camera, share, react, etc.) -->
+<div id="toolbar">
+  <!-- The BOT'S OWN microphone button — this is what setMic MUST resolve. -->
+  <button class="toolbar-btn" aria-label="Turn on microphone">microphone</button>
+  <button class="toolbar-btn" aria-label="Turn on camera">camera</button>
+  <button class="toolbar-btn" aria-label="Share screen">screen share</button>
+  <button class="toolbar-btn" aria-label="Send a reaction">reaction</button>
+  <button class="toolbar-btn" aria-label="Chat with everyone">chat</button>
+  <button class="toolbar-btn" aria-label="Raise hand (ctrl + alt + h)">raise hand</button>
+  <button class="toolbar-btn" aria-label="Leave call">leave call</button>
+</div>
+
+<!-- REACTION PICKER — CLOSED by default. Tests must OPEN before emoji entries resolve. -->
+<div id="reaction-picker">
+  <!-- Meet's actual picker set, rendered as <img alt> as observed live. -->
+  <button><img alt="🎊 🎊 🎊"></button>
+  <button><img alt="💗 💗 💗"></button>
+  <button><img alt="💯 💯 💯"></button>
+  <button><img alt="😆 😆 😆"></button>
+  <button><img alt="🙁 🙁 🙁"></button>
+  <button><img alt="😲 😲 😲"></button>
+</div>
+
+<!-- CONSENT DIALOG — Gemini "take notes for me" prompt. CLOSED by default. -->
+<div id="consent-dialog" role="dialog" aria-label="Gemini notes consent">
+  <h2>Gemini is taking notes for me</h2>
+  <p>This video call is being transcribed. Gemini is taking notes to help you stay focused on the conversation.</p>
+  <button aria-label="Join now">Join now</button>
+  <button aria-label="Decline">Decline</button>
+</div>
+
+<script>
+  // State for test assertions
+  window.__fixture_state = {
+    toolbarHidden: false,
+    pickerOpen: false,
+    consentOpen: false,
+    clickedElements: []
+  };
+
+  // Toolbar auto-hide simulation (real Meet behavior)
+  const toolbar = document.getElementById('toolbar');
+  let hideTimer;
+  const wakeToolbar = () => {
+    toolbar.classList.remove('hidden');
+    window.__fixture_state.toolbarHidden = false;
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      toolbar.classList.add('hidden');
+      window.__fixture_state.toolbarHidden = true;
+    }, 3000);
+  };
+  document.addEventListener('mousemove', wakeToolbar);
+  wakeToolbar(); // Start visible
+
+  // Reaction picker toggle
+  document.querySelector('[aria-label="Send a reaction"]').addEventListener('click', () => {
+    const picker = document.getElementById('reaction-picker');
+    picker.classList.toggle('open');
+    window.__fixture_state.pickerOpen = picker.classList.contains('open');
+  });
+
+  // Consent dialog toggle (for testing)
+  window.__fixture_state.openConsent = () => {
+    document.getElementById('consent-dialog').classList.add('open');
+    window.__fixture_state.consentOpen = true;
+  };
+
+  // Track clicks for verification
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (btn) {
+      window.__fixture_state.clickedElements.push({
+        tag: btn.tagName,
+        ariaLabel: btn.getAttribute('aria-label'),
+        alt: btn.querySelector('img')?.getAttribute('alt') || null,
+        id: btn.id,
+        className: btn.className
+      });
+    }
+  });
+</script>

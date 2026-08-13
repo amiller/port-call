@@ -43,6 +43,14 @@ docker cp "$(dirname "$0")/probe/mock-meet.html" "$C:/tmp/mock-meet.html" >/dev/
 docker cp "$(dirname "$0")/probe/surface-bench.mjs" "$C:/tmp/surface-bench.mjs" >/dev/null
 docker exec "$C" sh -c "DISPLAY=:99 node /tmp/surface-bench.mjs" || FAIL=1
 
+echo "== DOM fixture tests: selector ambiguity detection =="
+docker cp "$(dirname "$0")/probe/fixture-tests.mjs" "$C:/tmp/fixture-tests.mjs" >/dev/null
+docker cp "$(dirname "$0")/probe/fixtures/populated-call.html" "$C:/tmp/fixtures/" >/dev/null
+docker cp "$(dirname "$0")/probe/fixtures/no-bot-mic.html" "$C:/tmp/fixtures/" >/dev/null
+docker cp "$(dirname "$0")/probe/fixtures/picker-closed.html" "$C:/tmp/fixtures/" >/dev/null
+docker cp "$(dirname "$0")/probe/fixtures/pre-join-only.html" "$C:/tmp/fixtures/" >/dev/null
+docker exec "$C" sh -c "cd /tmp/fixtures && node /tmp/fixture-tests.mjs" || FAIL=1
+
 echo
 [ "$FAIL" -eq 0 ] && echo "BENCH GREEN" || echo "BENCH RED"
 exit $FAIL

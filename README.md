@@ -144,13 +144,27 @@ recompile-in-place rather than an image build.
 ## Testing
 
 `bench.sh` runs everything that needs no meeting: an audio click train, the camera and
-`getDisplayMedia` patches, and all the surface controllers driven against `probe/mock-meet.html` —
-a Meet-shaped DOM built **from a live aria-label dump**, deliberately reproducing the toolbar
-auto-hide and the chat-attribute trap.
+`getDisplayMedia` patches, all the surface controllers driven against `probe/mock-meet.html`, and
+DOM fixture tests that catch selector-ambiguity bugs.
+
+`probe/mock-meet.html` is a Meet-shaped DOM built **from a live aria-label dump**, deliberately
+reproducing the toolbar auto-hide and the chat-attribute trap.
 
 > A mock built from assumption is worse than no mock. Ours passed twice while production failed,
 > because it invented a `data-message-text` attribute Meet doesn't have. Build the mock from a
 > dump; when bench and production disagree, production is right.
+
+`probe/fixture-tests.mjs` runs the REAL selector logic against serialized populated-call DOM
+fixtures and asserts the EXACT behavior expected:
+- `setMic` resolves the bot's own "Turn on/off microphone" button, never a tile "Mute Alice's microphone"
+- Reaction emoji lookup resolves ONLY inside an OPEN picker, returns nothing when closed
+- Consent accept resolves the dialog's "Join now", never a pre-join "Ask to join"
+
+Each selector has a NEGATIVE fixture that asserts loud failure when the target element is absent,
+rather than silently grabbing a neighbor (the bug class that broke 2026-08-12).
+
+These tests encode the rule: **scope the query to a container, then verify the resolved element's
+aria-label before clicking. Never "first match wins" across the whole document.**
 
 `e2e.sh` runs the same surfaces against real Meet and asserts Meet's own view (presenting flag,
 camera toggle state), not just our side. `RECORD=1 ./e2e.sh` also captures per-step screenshots and

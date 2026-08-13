@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Negative Fixture — Pre-join lobby (no consent "Join now", only "Ask to join")</title>
+<!--
+  NEGATIVE TEST: what happens in the PRE-JOIN LOBBY?
+  CORRECT behavior: consent accept should NOT match the lobby's "Ask to join" button.
+  WRONG behavior: matches the first button with "join" in its label.
+-->
+<style>
+  body { background:#202124; color:#e8eaed; font:15px system-ui, sans-serif; margin:0; height:100vh; display:flex; flex-direction:column; justify-content:center; align-items:center }
+  #lobby { max-width:400px; width:100%; padding:24px; background:#292a2d; border-radius:12px }
+  h2 { margin:0 0 16px 0 }
+  input { width:100%; padding:12px; margin-bottom:16px; background:#3c4043; border:1px solid #5f6368; border-radius:4px; color:#e8eaed; font-size:15px; box-sizing:border-box }
+  button { background:#1a73e8; color:#fff; border:0; border-radius:4px; padding:12px 24px; cursor:pointer; font-size:14px; min-width:120px; margin-right:8px }
+  button.secondary { background:#3c4043 }
+</style>
+
+<div id="lobby">
+  <h2>Ready to join?</h2>
+  <input type="text" value="Vexa Bot" placeholder="Your name" aria-label="Your name">
+  <!-- These are PRE-JOIN buttons, NOT consent dialog buttons -->
+  <button aria-label="Ask to join">Ask to join</button>
+  <button class="secondary" aria-label="Cancel">Cancel</button>
+</div>
+
+<script>
+  window.__fixture_name = 'pre-join-only';
+  // A scoped consent selector should NOT match "Ask to join".
+  // That's a lobby button, not a consent dialog "Join now".
+  window.__fixture_state = { inLobby: true, consentDialog: false };
+</script>

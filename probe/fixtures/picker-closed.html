@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Negative Fixture — Reaction picker CLOSED (emoji entry should NOT resolve)</title>
+<!--
+  NEGATIVE TEST: what happens when the reaction picker is CLOSED?
+  CORRECT behavior: emoji lookup returns NOTHING (null/undefined), not a stale/hidden node.
+  WRONG behavior: matches a button elsewhere or a cached picker element.
+-->
+<style>
+  body { background:#202124; color:#e8eaed; font:15px system-ui, sans-serif; margin:0; height:100vh }
+  #toolbar { position:fixed; bottom:0; left:0; right:0; display:flex; gap:8px; justify-content:center; padding:14px; background:#202124; }
+  .toolbar-btn { background:#3c4043; color:#e8eaed; border:0; border-radius:24px; padding:12px 16px; cursor:pointer; min-width:48px }
+  #reaction-picker { position:fixed; bottom:70px; left:50%; transform:translateX(-50%); background:#292a2d; padding:10px; border-radius:12px; display:none; gap:8px }
+  #reaction-picker.open { display:flex }
+  #reaction-picker button { width:48px; height:48px; border-radius:50%; border:0; background:#3c4043; cursor:pointer; font-size:24px }
+</style>
+
+<div id="toolbar">
+  <button class="toolbar-btn" aria-label="Turn on microphone">microphone</button>
+  <button class="toolbar-btn" aria-label="Send a reaction">reaction</button>
+  <button class="toolbar-btn" aria-label="Leave call">leave call</button>
+</div>
+
+<!-- Picker is CLOSED (display:none) — tests should RESOLVE NOTHING -->
+<div id="reaction-picker">
+  <button><img alt="🎊 🎊 🎊"></button>
+  <button><img alt="💗 💗 💗"></button>
+  <button><img alt="💯 💯 💯"></button>
+  <button><img alt="😆 😆 😆"></button>
+</div>
+
+<script>
+  window.__fixture_name = 'picker-closed';
+  window.__fixture_state = { pickerOpen: false };
+</script>
