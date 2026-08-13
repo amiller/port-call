@@ -336,14 +336,21 @@ export async function startRecording(page: Page, inv: Invocation, recording: Bot
  *
  * Production (services/vexa-bot/core/src/index.ts:595, 1039–1059 + services/tts-playback.ts)
  * does this at the OS level, not via a page fake-mic: a PulseAudio chain `tts_sink → virtual_mic`
- * is what Chromium captures as its microphone. The bot (a) unmutes the meeting-UI mic button
- * (page.evaluate clicks the platform's mic control), (b) writes synthesized PCM to the tts_sink
- * device (paplay) which feeds virtual_mic, then (c) re-mutes after a short tail.
+ * is what Chromium captures as its microphone. The bot writes synthesized PCM to the tts_sink
+ * device (paplay) which feeds virtual_mic; silence between utterances is enforced there, by
+ * gating tts_sink — no PCM, no sound.
+ *
+ * There is deliberately NO meeting-UI mic toggle. It used to click the first element whose
+ * aria-label matched /microphone/i, which in any populated call is a participant tile's "Mute
+ * <name>'s microphone" control, not the bot's own button: on 2026-08-12 that opened a "Mute X for
+ * everyone?" modal in two live client meetings, left the bot muted (every speak act silent), and
+ * wedged every other toolbar act behind the modal. The toggle only ever controlled Meet's visual
+ * mute state — the audio gate is tts_sink — so it bought nothing and is gone. The bot now shows
+ * as unmuted for the whole call, which is honest: its mic is live the whole call.
  *
  * This bot package does not own the PulseAudio/TTS process plumbing (that is the container
- * entrypoint + a TTS service, outside the bot's import surface), so here we wire only the
- * BROWSER half it CAN drive — the meeting-UI mic toggle — and leave a clearly-marked seam for
- * the OS-level audio injection the VM image provides. Speaking is gated on inv.voiceAgentEnabled.
+ * entrypoint + a TTS service, outside the bot's import surface). Speaking is gated on
+ * inv.voiceAgentEnabled.
  */
 export interface SpeakController {
   /** Begin speaking `text` (TTS synthesized + injected via the VM's PulseAudio chain). */
@@ -354,42 +361,36 @@ export interface SpeakController {
 
 export function createSpeakController(page: Page, inv: Invocation): SpeakController {
   const enabled = !!inv.voiceAgentEnabled;
-  const platform = inv.platform;
   const tts = createTtsPlayback((m) => console.log(`[bot] ${m}`));   // OS-level TTS→tts_sink half
 
-  // Toggle the meeting-UI mic button so the bot is audible only while speaking (production
-  // unmutes before speech + auto-mutes after — index.ts:1039–1059). The PulseAudio source
-  // (tts_sink → virtual_mic) is the actual audio path and is provided by the VM image.
-  const setMic = async (on: boolean): Promise<void> => {
-    // Runs IN THE BROWSER; reach the DOM via globalThis (no DOM types in this Node-typed file).
-    await page.evaluate(({ on, platform }) => {
-      const doc = (globalThis as any).document;
-      const click = (sel: string) => doc?.querySelector(sel)?.click();
-      if (platform === 'teams') click('#microphone-button');
-      else if (platform === 'zoom') click('.join-audio-container__btn');
-      else {
-        // Google Meet: the mic button is identified by an aria-label containing "microphone".
-        const btn = Array.from(doc?.querySelectorAll('[role="button"],button') ?? [])
-          .find((b: any) => /microphone/i.test(b.getAttribute('aria-label') ?? '')) as any;
-        btn?.click();
-      }
-      void on; // toggle is a click; on/off intent is logged by the caller
-    }, { on, platform }).catch(() => { /* L4: best-effort UI drive */ });
-  };
+  // Meet's UI mute gates the outgoing WebRTC track, so the bot MUST be unmuted or the PulseAudio
+  // audio never leaves — and Meet joins muted by default. The bot's own control is the only one
+  // whose aria-label reads "Turn on/off microphone"; a participant tile's reads "Mute <name>".
+  // Matching that exact phrasing is what keeps this off other people's tiles. SET, never toggle:
+  // click only when it reads "Turn on" (i.e. currently muted). No re-mute afterwards — tts_sink is
+  // the silence gate — so this runs once per utterance and is a no-op after the first.
+  const ensureUnmuted = async (): Promise<string> => page.evaluate(() => {
+    const doc = (globalThis as any).document;
+    const btn = Array.from(doc.querySelectorAll('button,[role="button"]'))
+      .find((b: any) => /turn (on|off) microphone/i.test(b.getAttribute('aria-label') ?? '')) as any;
+    if (!btn) return 'mic button NOT FOUND';
+    const label = String(btn.getAttribute('aria-label'));
+    if (/turn on microphone/i.test(label)) { btn.click(); return `unmuted (was "${label}")`; }
+    return `already unmuted ("${label}")`;
+  });
 
   return {
     async speak(text: string, voice?: string): Promise<void> {
       if (!enabled) { console.error('[bot] speak ignored: voiceAgentEnabled is false'); return; }
       console.log(`[bot] speak: "${text.slice(0, 60)}"`);
-      await setMic(true);                                     // (a) unmute the meeting-UI mic button
-      // (b) synthesize via the TTS service + stream PCM to tts_sink → virtual_mic (the bot's mic).
+      console.log(`[bot] mic: ${await ensureUnmuted()}`);
+      // Synthesize via the TTS service + stream PCM to tts_sink → virtual_mic (the bot's mic).
+      // tts_sink is unmuted for the duration and re-muted after, which IS the audio gate.
       await tts.speak(text, voice).catch((e) => console.error(`[bot] speak: tts failed: ${String(e)}`));
-      await setMic(false);                                    // (c) re-mute after the tail
     },
     async stop(): Promise<void> {
       if (!enabled) return;
       tts.stop();                                             // barge-in: kill playback + re-mute tts_sink
-      await setMic(false);
       console.log('[bot] speak_stop');
     },
   };
