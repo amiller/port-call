@@ -1,5 +1,7 @@
 live/
 artifacts/
+transcripts/
+node_modules/
 *.mp4
 *.png
 __pycache__/
