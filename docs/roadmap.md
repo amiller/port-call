@@ -32,8 +32,9 @@ Any bird on any background. The first new background is the **brainrot box**
 ([#5](https://github.com/amiller/vexa-poc/issues/5)), under a constraint that keeps it honest: every animated element has to
 trace to a real pipeline signal — segment arrival, RMS amplitude, speaker change — and none may be
 a free-running timer. The existing HUD already works this way (the listening animation follows
-transcript recency, so the face *cannot* claim the pipeline is healthy when it isn't), and a toy
-that throws that away would be a downgrade dressed as a feature.
+transcript recency, so the face *cannot* claim the pipeline is healthy when it isn't). A background
+that animated on a timer would still look busy while transcription was dead, which costs more than
+the entertainment is worth.
 
 The gating question is cost, and it is empirical. The capture canvas is 2D and must stay 2D, so
 WebGL renders offscreen and gets composited in. The bench runs with `--disable-gpu`, meaning
@@ -53,8 +54,8 @@ becomes the design constraint.
   distracting to read what I'm saying."* The speaker should not have to read their own words back
   in real time.
 
-The through-line: being too chatty is a product failure, not a personality. The quietest useful
-channel wins.
+All three come from the same complaint: the bot talks too much and gives too little warning before
+it does. Every fix above either adds a cue before it speaks or removes something it says.
 
 ## 3. Facilitation
 

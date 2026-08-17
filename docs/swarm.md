@@ -52,9 +52,9 @@ told to bring the rig up. It reached **e2e 10/10 from the repo alone**, and repo
 layout bugs it had to work around by hand: compose referenced shim paths at the repo root when the
 canonical copies were in `shims/`, and the `live/` bind-mounts start empty on a fresh clone.
 
-That is the test that matters, and it is the same test as "could someone else run this" — which is
-why those two papercuts became blocking issues rather than notes. An agent doing a cold bring-up is
-a fresh user who complains in structured form.
+That is the same test as "could someone else run this", which is why those two papercuts became
+blocking issues rather than notes. An agent doing a cold bring-up is a fresh user who complains in
+structured form.
 
 ## What it is not
 
@@ -63,9 +63,9 @@ issue tracker. Work happens when agents are dispatched from a session, several a
 files that do not overlap. The queue and the rung discipline are what make those dispatches
 productive; they are not a robot that maintains the repo while nobody is looking.
 
-The gap between those two things is real and is not hidden here. The pieces that would close it —
-a queue whose items carry their own success conditions, and a bench rung broad enough that most
-work can be proven without a meeting — exist. Nothing is scheduled to run them.
+The pieces that would close that gap already exist: a queue whose items carry their own success
+conditions, and a bench rung broad enough that most work can be proven without a meeting. Nothing
+is scheduled to run them.
 
 ## Rules that came out of the failures
 
