@@ -44,6 +44,10 @@ COPY patches/bot-capture-bridge.ts /app/core/meetings/services/bot/src/capture-b
 # act the e2e harness reads. These are hot-swappable via ./hotswap.sh during development; they
 # are baked here so a rebuilt image is not silently missing them.
 COPY patches/bot-chat.ts /app/core/meetings/services/bot/src/chat.ts
+COPY patches/bot-repetition-guard.ts /app/core/meetings/services/bot/src/repetition-guard.ts
+# capture-bridge calls playback.onAmplitude (beak driven by real TTS RMS); upstream's tts-playback
+# has no such method, so omitting this file breaks the image build while the hot-swapped rig runs.
+COPY patches/bot-tts-playback.ts /app/core/meetings/services/bot/src/tts-playback.ts
 COPY patches/bot-camera.ts /app/core/meetings/services/bot/src/camera.ts
 COPY patches/bot-reactions.ts /app/core/meetings/services/bot/src/reactions.ts
 COPY patches/bot-selfcheck.ts /app/core/meetings/services/bot/src/selfcheck.ts
@@ -53,6 +57,12 @@ RUN cd /app/core/meetings/modules/join && /app/node_modules/.bin/tsc \
  && grep -q auto-select-tab-capture-source-by-title dist/browser-args.js \
  && ! grep -qE "^\s*'\[role=\"alert(dialog)?\"\]'," dist/googlemeet/selectors.js \
     || (echo "join dist: tab-capture flag missing, or bare role=alert still a removal indicator" && exit 1)
+# jsdom is what the DOM fixture rung parses saved populated-call snapshots with. It is not an
+# app dependency — the bot uses a real browser — but without it that rung dies on "Cannot find
+# package 'jsdom'". It had been failing that way unnoticed since the rung was added, because the
+# error came after an unrelated one and nobody read past it.
+RUN cd /app && npm install --no-save jsdom
+
 RUN cd /app/core/meetings/services/bot && /app/node_modules/.bin/tsc \
  && grep -q screen_share dist/contracts.js \
  && grep -q createScreenShareController dist/index.js \

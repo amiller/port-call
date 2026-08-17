@@ -24,6 +24,7 @@
  * cross as plain `(speakerIndex: number, samples: number[])` over `page.exposeFunction`, exactly
  * as production does, so the bot's import surface stays within the gate.
  */
+import { existsSync } from 'fs';
 import {
   launchPersistentBrowser,
   syncBrowserDataFromS3,
@@ -42,6 +43,7 @@ import type { BotRecordingSink } from './recording.js';
 import type { TelemetrySink } from './ports.js';
 import { createTtsPlayback } from './tts-playback.js';
 import { CAMERA_INIT_SCRIPT } from './camera.js';
+import { createRepetitionGuard } from './repetition-guard.js';
 
 /** Float32 PCM → base64 of its little-endian bytes — the EXACT codec wire payload, so a stored
  *  captured-signal.v1 frame round-trips through @vexa/capture-codec (encode→decode→same PCM). */
@@ -97,7 +99,16 @@ export async function launchBrowser(inv: Invocation): Promise<BrowserSession> {
   // Every bot gets its OWN profile dir — concurrent bots sharing one dir die on Chromium's
   // SingletonLock (#478: joining → failed <1s, "Opening in existing browser session").
   // Authenticated: restore the S3 userdata into this bot's dir before launch (index.ts:2313–2347).
-  const dataDir = makeEphemeralProfileDir();
+  // Signed-in joins (this rig has no S3): use the FULL profile dir written by the VNC login flow
+  // (provisionLogin profileDir), not loadSessionLocal's auth-essential subset — the subset restore
+  // left Google treating the bot as signed out (2026-08-13; 13 items loaded, still bounced to the
+  // sign-in wall). Required for calendared personal-account meetings, which wall out anonymous
+  // participants entirely. Move the dir aside to go back to guest joins. One bot at a time:
+  // Chromium's SingletonLock on the shared dir kills a second launch (#478).
+  const liveProfile = process.env.VEXA_PROFILE_DIR ?? '/var/lib/vexa/google-session-live';
+  const signedIn = existsSync(liveProfile);
+  const dataDir = signedIn ? liveProfile : makeEphemeralProfileDir();
+  if (signedIn) cleanStaleLocks(dataDir);
   if (inv.authenticated && inv.userdataS3Path) {
     syncBrowserDataFromS3({
       userdataS3Path: inv.userdataS3Path,
@@ -111,8 +122,10 @@ export async function launchBrowser(inv: Invocation): Promise<BrowserSession> {
 
   // getAuthenticatedBrowserArgs() is the minimal clean set remote-browser uses for signed-in
   // joins; getJoinBrowserArgs() adds the fake-device / autoplay flags the join lane needs. The
-  // join args win on conflict (later wins in Chromium arg parsing).
-  const args = [...getAuthenticatedBrowserArgs(), ...getJoinBrowserArgs()];
+  // join args win on conflict (later wins in Chromium arg parsing). --incognito would discard
+  // the restored cookies, so a signed-in launch must drop it.
+  const args = [...getAuthenticatedBrowserArgs(), ...getJoinBrowserArgs()]
+    .filter((a) => !(signedIn && a === '--incognito'));
   const { context, page } = await launchPersistentBrowser({ dataDir, args });
 
   // Grant camera/mic the way --use-fake-ui-for-media-stream used to. That flag had to go because
@@ -161,7 +174,9 @@ export async function launchBrowser(inv: Invocation): Promise<BrowserSession> {
     page,
     async close() {
       await context.close().catch(() => { /* best-effort */ });
-      removeProfileDir(dataDir);   // per-bot dir — leaking one per bot fills the disk in vexa-lite
+      // per-bot dir — leaking one per bot fills the disk in vexa-lite. NEVER remove the signed-in
+      // live profile: it is the durable Google session, shared across spawns.
+      if (!signedIn) removeProfileDir(dataDir);
     },
   };
 }
@@ -362,6 +377,14 @@ export interface SpeakController {
 export function createSpeakController(page: Page, inv: Invocation): SpeakController {
   const enabled = !!inv.voiceAgentEnabled;
   const tts = createTtsPlayback((m) => console.log(`[bot] ${m}`));   // OS-level TTS→tts_sink half
+  const guard = createRepetitionGuard('speak');                  // L+: anti-repetition guard
+
+  // Wire amplitude updates to the page for beak animation. Audio flowing IS the transition out of
+  // winding-up — clearing it here (not after playback) is what lets the speaking pose take over.
+  tts.onAmplitude((rms: number) => {
+    page.evaluate((r) => (globalThis as any).__vexaCam?.hud({ speaking: true, windingUp: false, amplitude: r }), rms)
+      .catch(() => { /* page may be navigating */ });
+  });
 
   // Meet's UI mute gates the outgoing WebRTC track, so the bot MUST be unmuted or the PulseAudio
   // audio never leaves — and Meet joins muted by default. The bot's own control is the only one
@@ -382,16 +405,36 @@ export function createSpeakController(page: Page, inv: Invocation): SpeakControl
   return {
     async speak(text: string, voice?: string): Promise<void> {
       if (!enabled) { console.error('[bot] speak ignored: voiceAgentEnabled is false'); return; }
+
+      // L+: anti-repetition guard — suppress duplicates within window
+      const verdict = guard.check(text);
+      if (!verdict.allowed) {
+        const ageMs = Date.now() - verdict.seenAt;
+        console.log(`[guard] suppressed repeat speak: "${text.slice(0, 60)}" (seen ${Math.round(ageMs / 1000)}s ago as "${verdict.normalized}")`);
+        return; // LOUD suppression — no silent fallbacks
+      }
+
       console.log(`[bot] speak: "${text.slice(0, 60)}"`);
       console.log(`[bot] mic: ${await ensureUnmuted()}`);
+
+      // Signal winding-up state (throat-clearing) before TTS flows
+      await page.evaluate(() => (globalThis as any).__vexaCam?.hud({ windingUp: true }))
+        .catch(() => { /* page may be navigating */ });
+
       // Synthesize via the TTS service + stream PCM to tts_sink → virtual_mic (the bot's mic).
       // tts_sink is unmuted for the duration and re-muted after, which IS the audio gate.
       await tts.speak(text, voice).catch((e) => console.error(`[bot] speak: tts failed: ${String(e)}`));
+
+      // Clear speaking state after playback
+      await page.evaluate(() => (globalThis as any).__vexaCam?.hud({ speaking: false, windingUp: false }))
+        .catch(() => { /* page may be navigating */ });
     },
     async stop(): Promise<void> {
       if (!enabled) return;
       tts.stop();                                             // barge-in: kill playback + re-mute tts_sink
       console.log('[bot] speak_stop');
+      await page.evaluate(() => (globalThis as any).__vexaCam?.hud({ speaking: false, windingUp: false }))
+        .catch(() => { /* page may be navigating */ });
     },
   };
 }

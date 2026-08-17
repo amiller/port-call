@@ -19,7 +19,10 @@ import { spawn, execSync, type ChildProcess } from 'node:child_process';
 import https from 'node:https';
 import http from 'node:http';
 
-const PAPLAY_ARGS = ['--raw', '--format=s16le', '--rate=24000', '--channels=1', '--device=tts_sink'];
+const RATE_HZ = 24000;
+const PAPLAY_ARGS = ['--raw', '--format=s16le', `--rate=${RATE_HZ}`, '--channels=1', '--device=tts_sink'];
+/** Amplitude envelope resolution — one RMS value per 100ms of AUDIO, emitted at 10Hz wall clock. */
+const FRAME_MS = 100;
 
 function setTtsMute(muted: boolean, log: (m: string) => void): void {
   const v = muted ? '1' : '0';
@@ -37,6 +40,9 @@ function setTtsMute(muted: boolean, log: (m: string) => void): void {
   }
 }
 
+/** Called with RMS amplitude of each TTS PCM chunk (0.0–1.0 typical range). */
+export type TtsAmplitudeCallback = (rms: number) => void;
+
 export interface TtsPlayback {
   /** Synthesize `text` (voice optional) and play it into the meeting via tts_sink. Resolves when
    *  playback finishes. Best-effort: a synthesis/playback failure logs + resolves (never throws out
@@ -44,17 +50,24 @@ export interface TtsPlayback {
   speak(text: string, voice?: string): Promise<void>;
   /** Interrupt any in-flight playback (barge-in) + re-mute. */
   stop(): void;
+  /** Register a callback for PCM amplitude updates during playback (batched ~10Hz). */
+  onAmplitude(cb: TtsAmplitudeCallback): void;
 }
 
 /** Build a TtsPlayback that streams the TTS service's PCM straight to paplay. */
 export function createTtsPlayback(log: (m: string) => void = () => { /* */ }): TtsPlayback {
   let proc: ChildProcess | null = null;
+  let ampCallback: TtsAmplitudeCallback | null = null;
+  const tickers = new Set<NodeJS.Timeout>();
+
+  const stopTickers = (): void => { tickers.forEach(clearInterval); tickers.clear(); };
 
   const stop = (): void => {
     if (proc) {
       try { proc.stdin?.destroy(); proc.kill('SIGKILL'); } catch { /* */ }
       proc = null;
     }
+    stopTickers();
     setTtsMute(true, log);
   };
 
@@ -89,9 +102,47 @@ export function createTtsPlayback(log: (m: string) => void = () => { /* */ }): T
         const p = spawn('paplay', PAPLAY_ARGS, { stdio: ['pipe', 'pipe', 'pipe'] });
         proc = p;
         p.stderr?.on('data', (d: Buffer) => log(`[tts] paplay: ${d.toString().trim()}`));
-        const done = () => { if (proc === p) proc = null; setTtsMute(true, log); resolve(); };
+        const done = () => { if (proc === p) proc = null; stopTickers(); setTtsMute(true, log); resolve(); };
         p.on('exit', done);
         p.on('error', (e) => { log(`[tts] paplay error: ${String(e)}`); done(); });
+
+        // ── Amplitude envelope for the beak animation ────────────────────────────────────────
+        // The TTS service does NOT trickle audio in realtime: it answers with a Content-Length
+        // body, so 5.9s of PCM arrives in ~5ms across 6 chunks (measured on tts-shim 2026-08-17).
+        // Emitting RMS as bytes ARRIVE therefore fires once, on the leading-silence chunk, and the
+        // beak sees amplitude 0 for the whole utterance. So: build a per-frame envelope indexed by
+        // PLAYBACK POSITION, and emit it on a wall clock started when paplay starts consuming.
+        const FRAME_SAMPLES = (RATE_HZ * FRAME_MS) / 1000;
+        const envelope: number[] = [];
+        let sumSquares = 0, frameSamples = 0;
+        let odd: number | null = null;                // a chunk boundary can split one s16 sample
+        res.on('data', (chunk: Buffer) => {
+          let i = 0;
+          if (odd !== null) {                         // finish the sample straddling the boundary
+            const s = ((chunk[0] << 8) | odd) << 16 >> 16;
+            sumSquares += (s / 32768) ** 2; frameSamples++; odd = null; i = 1;
+          }
+          for (; i + 1 < chunk.length; i += 2) {
+            const s = chunk.readInt16LE(i);
+            sumSquares += (s / 32768) ** 2;
+            if (++frameSamples === FRAME_SAMPLES) {
+              envelope.push(Math.sqrt(sumSquares / FRAME_SAMPLES));
+              sumSquares = 0; frameSamples = 0;
+            }
+          }
+          if (i < chunk.length) odd = chunk[i];
+        });
+        res.on('end', () => { if (frameSamples) envelope.push(Math.sqrt(sumSquares / frameSamples)); });
+
+        const startedAt = Date.now();
+        const ticker = setInterval(() => {
+          if (!ampCallback) return;
+          const frame = Math.floor((Date.now() - startedAt) / FRAME_MS);
+          ampCallback(envelope[frame] ?? 0);
+        }, FRAME_MS);
+        ticker.unref?.();
+        tickers.add(ticker);
+
         res.pipe(p.stdin!);                           // stream PCM straight to the mic sink
       });
       req.on('error', (e) => { log(`[tts] request error: ${String(e)}`); resolve(); });
@@ -99,5 +150,7 @@ export function createTtsPlayback(log: (m: string) => void = () => { /* */ }): T
     });
   };
 
-  return { speak, stop };
+  const onAmplitude = (cb: TtsAmplitudeCallback): void => { ampCallback = cb; };
+
+  return { speak, stop, onAmplitude };
 }

@@ -11,8 +11,18 @@
  *
  * Results go to stdout as one `[chat] {...}` line, landing in /tmp/vexa-workloads/mtg-<id>-*.log,
  * so the e2e harness reads them with grep — same convention as `[selfcheck]`.
+ *
+ * L+: Anti-repetition guard wired into send() — duplicates within window are suppressed loudly.
  */
 import type { Page } from '@vexa/remote-browser';
+import { createRepetitionGuard } from './repetition-guard.js';
+
+// MODULE scope, not per-controller: index.ts builds a NEW ChatController for EVERY chat_send act
+// (surface() re-imports this module, cache-busted only by mtime). A guard owned by the controller
+// therefore starts empty on every send and suppresses nothing — it was a no-op until this moved
+// out here. ESM caches by URL, so an unedited file keeps this history across acts, which is
+// exactly the lifetime the guard needs; a hotswap deliberately resets it.
+const guard = createRepetitionGuard('chat');
 
 const OPEN = 'button[aria-label*="Chat with everyone" i], button[aria-label*="chat" i]';
 const INPUT = 'textarea[aria-label*="Send a message" i], textarea[placeholder*="Send a message" i], ' +
@@ -67,6 +77,14 @@ export function createChatController(page: Page): ChatController {
 
   return {
     async send(text: string): Promise<void> {
+      // L+: anti-repetition guard — suppress duplicates within window
+      const verdict = guard.check(text);
+      if (!verdict.allowed) {
+        const ageMs = Date.now() - verdict.seenAt;
+        console.log(`[guard] suppressed repeat chat: "${text.slice(0, 60)}" (seen ${Math.round(ageMs / 1000)}s ago as "${verdict.normalized}")`);
+        return; // LOUD suppression — no silent fallbacks
+      }
+
       await page.bringToFront();
       await openPanel();
       const box = page.locator(INPUT).first();
