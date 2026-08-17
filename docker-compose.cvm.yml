@@ -1,0 +1,82 @@
+# The same rig, shaped for a dstack / Phala CVM.
+#
+#   phala deploy -n vexa -c docker-compose.cvm.yml -e cvm.env --vcpu 4 --memory 8192 --disk-size 60
+#
+# Why a second file rather than the main one: a CVM is handed ONE compose file and nothing else.
+# No build context, no repo, no host filesystem. Phala's own pre-deploy rules reject `build:`,
+# `dockerfile:`, `env_file:` and any host bind mount, and every `image:` must be pullable from
+# inside the CVM. docker-compose.yml is the development file (it builds from this checkout and
+# bind-mounts live/ for hot swap); this one is that file with every host dependency removed.
+#
+# So the two images must be pushed first:
+#   docker build -f Dockerfile.patched -t $VEXA_IMAGE . && docker push $VEXA_IMAGE
+#   docker build -f Dockerfile.shims   -t $SHIMS_IMAGE . && docker push $SHIMS_IMAGE
+# Both must be amd64 (CVMs are Intel TDX); build on an amd64 host or use --platform linux/amd64.
+#
+# The shim sources and sfx/ are baked into the shims image, and the bot's src/dist are baked into
+# the vexa image — dropping the mounts loses nothing but the ~10s hot-swap loop, which needs a
+# host to edit files on and so cannot exist here anyway.
+#
+# Secrets: never in this file (it is stored in plaintext by the backend). Put NEAR_API_KEY in the
+# env file passed to `phala deploy -e`, which is encrypted client side. Drop the near-shim service
+# entirely if you have no transcription key — join / speak / chat / camera need no credential;
+# transcription is then simply dead, and the bot will say so rather than pretend.
+services:
+  postgres:
+    image: postgres:17-alpine
+    command: -c idle_in_transaction_session_timeout=60000
+    environment:
+      POSTGRES_DB: vexa
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    restart: unless-stopped
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d vexa"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  near-shim:
+    image: ${SHIMS_IMAGE:?set SHIMS_IMAGE to a pushed registry tag}
+    command: uvicorn near-shim:app --host 0.0.0.0 --port 8001
+    environment:
+      NEAR_API_KEY: ${NEAR_API_KEY:?set NEAR_API_KEY}
+      SHIM_LOG: metrics
+    restart: unless-stopped
+
+  tts-shim:
+    image: ${SHIMS_IMAGE:?set SHIMS_IMAGE to a pushed registry tag}
+    command: uvicorn tts-shim:app --host 0.0.0.0 --port 8002
+    environment:
+      TTS_ENGINE: ${TTS_ENGINE:-piper}
+    restart: unless-stopped
+
+  vexa-lite:
+    image: ${VEXA_IMAGE:?set VEXA_IMAGE to a pushed registry tag}
+    shm_size: 2gb
+    depends_on:
+      postgres: {condition: service_healthy}
+    ports:
+      - "8056:8056"
+      - "3000:3000"
+    volumes:
+      - recordings:/var/lib/vexa/recordings
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: vexa
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_SSL_MODE: disable
+      ADMIN_API_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN}
+      TRANSCRIPTION_SERVICE_URL: http://near-shim:8001/v1/audio/transcriptions
+      TRANSCRIPTION_SERVICE_TOKEN: near
+      VEXA_AUDIO_METER: "1"
+      TTS_SERVICE_URL: http://tts-shim:8002
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  recordings:

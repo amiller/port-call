@@ -17,6 +17,7 @@ services:
       POSTGRES_DB: vexa
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+    restart: unless-stopped
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -29,7 +30,7 @@ services:
     build: {context: ., dockerfile: Dockerfile.shims}
     image: vexa-shims:local
     command: uvicorn near-shim:app --host 0.0.0.0 --port 8001
-    volumes: [./near-shim.py:/app/near-shim.py:ro]
+    volumes: [./shims/near-shim.py:/app/near-shim.py:ro]
     environment:
       NEAR_API_KEY: ${NEAR_API_KEY:?set NEAR_API_KEY}
       SHIM_LOG: metrics          # content-free diagnostics; "text" also logs transcripts
@@ -39,7 +40,7 @@ services:
     build: {context: ., dockerfile: Dockerfile.shims}
     image: vexa-shims:local
     command: uvicorn tts-shim:app --host 0.0.0.0 --port 8002
-    volumes: [./tts-shim.py:/app/tts-shim.py:ro, ./sfx:/app/sfx:ro]
+    volumes: [./shims/tts-shim.py:/app/tts-shim.py:ro, ./shims/sfx:/app/sfx:ro]
     environment:
       TTS_ENGINE: ${TTS_ENGINE:-piper}
     restart: unless-stopped
@@ -73,6 +74,9 @@ services:
       ADMIN_API_TOKEN: ${ADMIN_TOKEN:-devadmintoken123}
       TRANSCRIPTION_SERVICE_URL: http://near-shim:8001/v1/audio/transcriptions
       TRANSCRIPTION_SERVICE_TOKEN: near
+      # Turns a listener bot into a measuring instrument: per-second [audio] RMS lines per speaker,
+      # so "did that sound actually reach the meeting?" is answered by data, not by asking someone.
+      VEXA_AUDIO_METER: "1"
       TTS_SERVICE_URL: http://tts-shim:8002
     restart: unless-stopped
 

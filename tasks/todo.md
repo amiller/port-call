@@ -114,3 +114,102 @@ conditions, and the audio/reaction fixes become verifiable without a client call
 
 This puts a real Google identity in the room. Use the lab room only, never a client meeting, and
 keep the profile off any shared credential path.
+
+## 2026-08-13 live-run follow-ups (Luc meeting — first signed-in calendared join)
+
+Live results: signed-in join worked; transcript, chat, reactions, and AUDIBLE speech/sfx all
+verified in a real populated meeting — the mute fixes graduate from [UNVERIFIED]. One blocker
+found, cleared by hand:
+
+- [ ] Auto-dismiss Meet's first-run onboarding popups ("people can hear you" style) that a FRESH
+      Google account gets on its first joins. One blocked all toolbar acts until Andrew cleared it
+      over VNC. Same shape as the Gemini-consent fix: detect + click through in the act/join path
+      (and add to selfcheck so a blocked overlay is visible from outside). Popup likely per-account
+      one-time, so reproduce with a second fresh account or a cleared profile before calling it fixed.
+- [ ] Rename the bot account's display name ("Account Link" → "Vexa") in Google account settings.
+- [ ] Free-tier Meet caps 3+ participant calls at 60 min — the bot should surface "call ending soon"
+      (it's already in selfcheck's buttons dump) rather than dying silently with the room.
+
+## 2026-08-13 feedback-derived items (mined from 08-12 transcripts, meetings 67-76)
+
+Reception verdict: amused, not impressed — entertainment value currently comes from failure modes.
+Two concrete usability complaints, both actionable:
+
+- [ ] HUD caption is DISTRACTING to the speaker (Albiona, m67: "it's a little distracting to read
+      what I'm saying"). Add caption modes to camera_show: off / headline-only / full; consider
+      delay or fade so the speaker isn't reading their own words live.
+- [ ] Anti-repetition guard for spoken/chat lines (Tina, m76: "Why does this keep on saying the
+      same line? Can you not learn something?"). Track recently-said lines; refuse or vary repeats.
+- [ ] Facilitator role is now doubly endorsed: Andrew mid-call 08-13 ("managing the control flow
+      of a meeting, welcoming everyone") and Tina in m71 proposed "the live conversation
+      facilitator agent" as a Shape Rotator grants/bounties cohort project.
+
+## 2026-08-13 zed-rig portability papercuts (from the rig bring-up agent; fixes wanted for dstack)
+
+zed rig reached e2e 10/10 from the repo alone. Two layout bugs it worked around by hand:
+- [x] compose references ./near-shim.py, ./tts-shim.py, ./sfx at repo root; canonical copies are in
+      shims/. Point compose at shims/ paths so a fresh clone composes without file copies.
+      (2026-08-17: compose volumes AND Dockerfile.shims COPY lines both fixed — the build needed
+      them at root too, not just the mounts.)
+- [x] live/ bind-mounts start empty on a fresh clone; document (or script) populating them from the
+      built image before first run. This is the from-scratch path dstack will take.
+      (2026-08-17: ./populate-live.sh; plain `docker build`, not `compose build`, so it does not
+      demand NEAR_API_KEY to interpolate the file before the key is needed.)
+- [x] BONUS, found by the fresh-clone test: Dockerfile.patched never copied patches/bot-tts-playback.ts,
+      so capture-bridge's playback.onAmplitude failed tsc and the image build died. The rig looked
+      healthy because live/ had the file. Fixed. patches/bot-repetition-guard.ts is still UNTRACKED
+      while Dockerfile.patched COPYs it — `git add` it or the next fresh clone breaks again.
+
+## 2026-08-17 dstack / Phala CVM: what is actually left (see docs/operations.md)
+
+Fresh clone verified end to end in a scratch dir: build both images -> populate-live -> up ->
+gateway 200, TTS 200 (55KB wav), patched code present. docker-compose.cvm.yml added (no build:,
+no bind mounts, images by registry tag) and verified running locally in that shape.
+- [ ] push the two images to a registry — the ONLY thing between here and a CVM. ~2.4GB + ~0.9GB,
+      both already amd64. Nothing is pushed yet (checked socrates1024/* and ghcr.io/amiller/*).
+- [ ] `phala deploy -c docker-compose.cvm.yml` with >= 4 vCPU / 8GB / 60GB. The 1/2GB/40GB default
+      is too small on all three axes (bot = ~1.4GB RSS, ~2.3 cores at Chromium start, 6.2GB image).
+- [ ] token minting in a CVM: relaunch.sh docker-execs admin-api on 127.0.0.1:8001 inside the
+      container. No docker socket in a CVM. Needs --dev-os + ssh, a pre-launch script, or exposing
+      admin-api through the gateway (a real decision — that endpoint mints tokens).
+- [ ] relaunch.sh sources NEAR_API_KEY from ~/projects/ic3camp-teexai/... — exists on one machine.
+- [ ] Shared signed-in profile: strip Singleton* lock files when installing the tar on a new host.
+      Works on two rigs at once (verified zed+fractal 2026-08-13); each rig needs its own lab room
+      eventually — both defaulting to tog-tccc-szk means tests can collide.
+
+## 2026-08-13 speak-state HUD (Andrew, after first live speaking session) — promoted to issue #3 (+ lag measurement) 2026-08-14
+
+"The speaking not being easy to see when it's about to speak" — add visual speak states to the HUD:
+- [ ] 'winding-up': on speak act accepted (pre-TTS), rooster throat-clear — comedic, brainrot
+      register (AHEM beat). Gives the room the pre-speech cue humans get from body language.
+- [ ] 'speaking': beak animates DRIVEN BY ACTUAL TTS PCM level (RMS per chunk -> beak openness),
+      not a timer — derived state, same can't-lie principle as the listening animation.
+- [ ] back to derived listening/idle after. Extend camera-bench to assert the state transitions.
+
+---
+
+# 4. Upstream the performance-fleet capabilities (from the 2026-08-13 synthetic-meeting experiment)
+
+The cloned-voice meeting demo (see teleport planning session 2026-08-13) validated capabilities
+that currently live as loose scripts on fractal (~/setup_fleet.sh, ~/record_show.sh, ~/conduct3.sh)
+and per-rig forks. Fold them into the repo:
+
+- [ ] `fleet.sh`: N guest-mode compose instances from one checkout (port offsets, per-instance
+      token files, `. ./.env` not the teexai path, sed'd demo.sh/relaunch.sh). Guest mode = absent
+      /var/lib/vexa/google-session-live; BOT_NAME sets the Meet display name at join.
+- [ ] `record.sh`: synchronized multitrack recording — x11grab of one instance's :99
+      (MUST be -pix_fmt yuv420p; default yuv444 renders black on phone hw decoders) + each
+      instance's `pulse tts_sink.monitor` at 48k mono (44.1k stereo capture showed pulse-underrun
+      doubled word-tails; verify tails by autocorrelation). Remote meeting audio never reaches
+      pulse (bots hear via in-page WebRTC) — own-track multitrack + mix is the only clean path.
+- [ ] **speak queue bug**: a `speak` act arriving while the bot is mid-playback is silently
+      dropped (shim pads 600ms lead/400ms tail widen the window). Queue speaks (or return busy)
+      in the playback path. e2e: fire two back-to-back says, assert two audio blocks in the
+      tts_sink.monitor capture.
+- [ ] **#3 stooge is now cheap**: a second guest instance IS the populated-room participant.
+      Wire journeys.sh full mode against a room populated by another instance, and capture a real
+      populated-call DOM snapshot for the #2 fixtures from it.
+- [ ] First-run Google modals block toolbar acts (chat/react/camera) but NOT speak; auto-dismiss
+      at join (current workaround: xdotool click ~(957,707) on :99).
+- [ ] Document: the big canvas headline is a DERIVED active-speaker label (whoever that bot last
+      heard), not the camera_show text — reads as crossed names until you know.

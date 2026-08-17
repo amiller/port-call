@@ -4,17 +4,11 @@
 
 The canonical sources are `patches/` in this repo. The code that *runs* is `live/` on the rig,
 bind-mounted into the container at four paths (bot src/dist, join src/dist). Compose creates
-`live/` empty on a fresh clone — populate it from the built image before first run:
+`live/` empty on a fresh clone, and mounting that emptiness over the bot's src/dist leaves a
+container with no bot code in it. Populate from the built image before the first `up`:
 
 ```bash
-docker compose build vexa-lite
-C=$(docker create vexa-lite:patched)
-mkdir -p live/services-bot-{src,dist} live/modules-join-{src,dist}
-docker cp $C:/app/core/meetings/services/bot/src/.  live/services-bot-src/
-docker cp $C:/app/core/meetings/services/bot/dist/. live/services-bot-dist/
-docker cp $C:/app/core/meetings/modules/join/src/.  live/modules-join-src/
-docker cp $C:/app/core/meetings/modules/join/dist/. live/modules-join-dist/
-docker rm $C
+./populate-live.sh          # builds vexa-lite, docker cp's the four dirs out of it
 ```
 
 The edit loop: change a file in `patches/`, copy it to the matching path in `live/`, run

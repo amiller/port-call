@@ -31,9 +31,26 @@ live in **[docs/findings.md](docs/findings.md)**.
 | Camera | canvas → `getUserMedia` patch → a live HUD + animated avatar | ✅ |
 | Screenshare | the same canvas → `getDisplayMedia` patch | ✅ presenting confirmed in DOM |
 
-The camera renders a **live transcript caption and an animated character**, with state *derived*
-rather than commanded — the bird's "listening" animation follows transcript recency, so the face
-cannot claim the pipeline is healthy when it isn't.
+The camera is a **selectable character over a selectable background** — three of each, independent,
+so any avatar goes on any background:
+
+```bash
+./demo.sh camera "ON AIR"                      # unchanged: keeps whatever is set
+./demo.sh camera "ON AIR" tina brainrot        # avatar, background
+./demo.sh camera "STATUS" rooster vitals
+```
+
+| Background | What it is for |
+|---|---|
+| `transcript` | the live caption strip — proves the pipeline is flowing |
+| `vitals` | segments, segments/min, seconds since the last one, outbound audio level |
+| `brainrot` | the entertaining one: recent transcript words thrown around the frame |
+
+Every animated thing is *derived* rather than commanded — the "listening" animation follows
+transcript recency, the beak opens on the actual RMS of the TTS audio, and the brainrot box calms
+down when the room goes quiet. The face cannot claim the pipeline is healthy when it isn't, and
+`bench.sh` asserts that: nine avatar×background combinations must render *distinguishable* frames,
+and a background that looked the same busy as idle would fail.
 
 ---
 
@@ -66,8 +83,10 @@ recompile lands on the next act with the bot still in the meeting. Only the comp
 2. **A desktop OAuth client** (`http://localhost` redirect). Point `LAB_CLIENT_SECRETS` at its JSON.
 3. `python3 -u lab-room.py auth` → approve → `python3 lab-room.py create` prints a permanent open
    room code. Put it in `e2e.sh` as the default.
-4. `NEAR_API_KEY=… docker compose up -d --build` (the shims need a transcription endpoint).
-5. `./e2e.sh` — it should print 10 passes.
+4. `./populate-live.sh` — fills the `live/` bind-mount dirs from the built image. A fresh clone has
+   none, and compose would mount empty dirs over the bot's source.
+5. `NEAR_API_KEY=… docker compose up -d --build` (the shims need a transcription endpoint).
+6. `./e2e.sh` — it should print 10 passes.
 
 That gets you guest joins to open rooms. Joining **calendared personal-account meetings** needs a
 signed-in Google identity for the bot, and the calendar Join list needs its own laptop-side OAuth —
@@ -80,6 +99,26 @@ Day-to-day development is a ~10s hot-swap loop against a live bot, backed by a t
 ladder (`bench.sh` with no meeting → `e2e.sh` against real Meet → `journeys.sh` for the paths e2e
 can't see). How `live/` gets populated on a fresh clone, the `patches/`↔`live/` sync discipline,
 hot-swap semantics, and the mock-from-a-dump testing rules are in **[docs/dev.md](docs/dev.md)**.
+
+Most of this repo was written by agents, which is only possible because of a specific rule about
+what they may be assigned: work whose success condition the agent can observe without a meeting.
+That rule, the three rungs it produced, and an honest account of what is *not* automated are in
+**[docs/swarm.md](docs/swarm.md)**.
+
+## Where this is going
+
+**[docs/roadmap.md](docs/roadmap.md)** — the short version: the camera tile becomes a selectable
+background × selectable avatar instead of one hardcoded rooster over a transcript strip; the bot
+gets a visible wind-up before it speaks and stops repeating itself; and the whole thing aims at
+being a meeting *facilitator* rather than a novelty. Open work is in
+[issues](https://github.com/amiller/vexa-poc/issues).
+
+## Where it runs
+
+fractal and zed today, and it is written to run in a CVM — every shim is a service rather than
+something on the host, because a confidential VM has no host to put files on. How far that goes,
+what the Phala/dstack answer actually is, and what someone else needs to stand this up are in
+**[docs/operations.md](docs/operations.md)**.
 
 ## Known gaps
 

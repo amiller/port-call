@@ -19,7 +19,7 @@ RUN mkdir -p /opt/piper && cd /opt/piper \
  && python3 -m piper.download_voices en_US-lessac-medium
 
 WORKDIR /app
-COPY near-shim.py tts-shim.py ./
-COPY sfx/ ./sfx/
+COPY shims/near-shim.py shims/tts-shim.py ./
+COPY shims/sfx/ ./sfx/
 ENV PIPER_BIN=piper SFX_DIR=/app/sfx SHIM_LOG=metrics
 EXPOSE 8001 8002
