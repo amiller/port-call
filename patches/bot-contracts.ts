@@ -87,7 +87,7 @@ export type Act =
   | { action: 'screen_share'; text: string }
   | { action: 'screen_share_stop' }
   | { action: 'selfcheck' }
-  | { action: 'camera_show'; text: string; sub?: string }
+  | { action: 'camera_show'; text: string; sub?: string; avatar?: string; bg?: string }
   | { action: 'camera_off' }
   | { action: 'reaction'; emoji: string };
 

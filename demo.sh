@@ -8,6 +8,8 @@
 #   ./demo.sh say "hello"          # acts go to that same bot
 #   ./demo.sh chat "hi everyone"
 #   ./demo.sh camera "ON AIR"
+#   ./demo.sh camera "ON AIR" tina brainrot   # avatar: rooster|tina|dmarz
+#                                             # background: transcript|vitals|brainrot
 #   ./demo.sh share "my slide"
 #   ./demo.sh react 🎊
 #   ./demo.sh check                # selfcheck dump
@@ -41,11 +43,20 @@ case "${1:-}" in
       S=$(curl -s $GW/bots/status -H "X-API-Key: $BOT" | python3 -c "import sys,json;r=[x for x in json.load(sys.stdin)['running'] if str(x['id'])=='$ID'];print(r[0]['status'] if r else 'gone')")
       [ "$S" = active ] && break; [ "$S" = gone ] && { echo "died during join"; exit 1; }; sleep 5
     done
+    # A meeting that walls the bot behind Google sign-in (any personal-account calendared meeting)
+    # leaves status non-active forever; without this check the script lied "active" on timeout.
+    [ "${S:-}" = active ] || { echo "never went active (last: ${S:-unknown}) — ./demo.sh shot to see why"; exit 1; }
     echo "bot $ID active in $ROOM — it stays until ./demo.sh stop" ;;
   say)     need; pub "$(python3 -c 'import json,sys;print(json.dumps({"action":"speak","text":sys.argv[1]}))' "$2")" ;;
   chat)    need; pub "$(python3 -c 'import json,sys;print(json.dumps({"action":"chat_send","text":sys.argv[1]}))' "$2")" ;;
   read)    need; pub '{"action":"chat_read"}' ;;
-  camera)  need; pub "$(python3 -c 'import json,sys;print(json.dumps({"action":"camera_show","text":sys.argv[1]}))' "${2:-VEXA}")" ;;
+  # camera "HEADLINE" [avatar] [background]  — avatar and background are independent; omitting
+  # either leaves it as-is, so `./demo.sh camera "TEXT"` behaves exactly as it always has.
+  camera)  need; pub "$(python3 -c 'import json,sys
+a = {"action": "camera_show", "text": sys.argv[1]}
+if len(sys.argv) > 2 and sys.argv[2]: a["avatar"] = sys.argv[2]
+if len(sys.argv) > 3 and sys.argv[3]: a["bg"] = sys.argv[3]
+print(json.dumps(a))' "${2:-VEXA}" "${3:-}" "${4:-}")" ;;
   share)   need; pub "$(python3 -c 'import json,sys;print(json.dumps({"action":"screen_share","text":sys.argv[1]}))' "${2:-VEXA}")" ;;
   unshare) need; pub '{"action":"screen_share_stop"}' ;;
   react)   need; pub "$(python3 -c 'import json,sys;print(json.dumps({"action":"reaction","emoji":sys.argv[1]}))' "${2:-🎊}")" ;;

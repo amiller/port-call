@@ -37,7 +37,7 @@ import { type SelfCheck } from './selfcheck.js';
 import { type ChatController } from './chat.js';
 import { createCameraController, type CameraController } from './camera.js';
 import { type ReactionController } from './reactions.js';
-import { statSync } from 'node:fs';
+import { statSync, existsSync } from 'node:fs';
 
 /**
  * Load a surface controller FRESH per act, cache-busted by the file's mtime.
@@ -176,7 +176,8 @@ function voiceHandler(speak: SpeakController, page: any, platform: string,
     // transcript lines, which is version-agnostic.
     if (act.action === 'camera_show') {
       const m = await surface('camera');
-      return void await m.createCameraController(page).show(act.text, act.sub);
+      return void await m.createCameraController(page)
+        .show(act.text, act.sub, { avatar: act.avatar, bg: act.bg });
     }
     if (act.action === 'camera_off') {
       const m = await surface('camera');
@@ -190,6 +191,10 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
   let inv: Invocation;
   try {
     inv = loadInvocation(env);
+    // Signed-in mode is decided by the presence of the VNC-login profile (capture-bridge launches
+    // with it), so the join layer must skip guest name-entry — signed-in Meet has no name field,
+    // and the guest path stalls 2min hunting for it, then fails the join (2026-08-13).
+    if (existsSync(env.VEXA_PROFILE_DIR ?? '/var/lib/vexa/google-session-live')) inv.authenticated = true;
   } catch (e) {
     if (e instanceof InvocationError) {
       // No valid connection_id to attribute the failure to → emit a best-effort terminal
