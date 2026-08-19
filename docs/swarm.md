@@ -38,6 +38,55 @@ specifically to move evidence *down* a rung:
 
 The queue in [`tasks/todo.md`](../tasks/todo.md) is ordered by this principle rather than by value.
 
+## Which rig, and the gate
+
+There are four rigs on fractal. **Rig 1 is the one Andrew takes meetings on.** `e2e.sh` spawns bots
+and DELETEs every bot in the room it targets, so an agent running it against rig 1 can tear the bot
+out of a live call. Swarm work goes on another rig — 4 is the staging rig.
+
+`rig-env.sh` derives the container, the gateway port and the token paths from one `RIG` variable,
+and infers it from the directory name: a script run inside `~/vexa-rig4` drives rig 4 without being
+told. Before that, `hotswap.sh`, `demo.sh`, `join-meeting.sh` and `relaunch.sh` all hardcoded rig 1,
+so a gate run from `~/vexa-rig4` recompiled the human's rig instead. `e2e.sh` also takes a per
+rig+room `flock`, so two agents queue rather than killing each other's bot mid-assertion.
+
+| | |
+|---|---|
+| `RIG=4 ./bench.sh` | no meeting, no bot, no human |
+| `RIG=4 ./e2e.sh <code>` | a standing open lab room |
+| `./gate.sh` (from `~/vexa-rig4`) | pre-flight build → deploy → bench → e2e. Refuses rig 1. |
+
+### staging and prod
+
+There are two environments, and they are rigs, not branches:
+
+| | | |
+|---|---|---|
+| **staging** | rig 4 | moves **by itself** when a branch passes the gate |
+| **prod** | rig 1 — the rig Andrew takes meetings on | moves only when a human runs `./deploy-prod.sh` |
+
+This is the split the oauth3 side already uses: agents commit to branches and never deploy, and
+staging vs prod is a *deploy target* rather than a branch (`deploy-staging-core.sh` /
+`deploy-prod-core.sh`, each taking a git ref). The one thing added here is that landing on staging
+is automatic — an agent runs `./promote.sh <branch>` itself and the merge happens if the gate is
+green. Nobody shepherds branches into a shared stream by hand.
+
+`deploy-prod.sh` refuses any ref that is not staging or an ancestor of it, so code that skipped the
+gate cannot reach the rig Andrew is in a meeting on. It archives before it touches anything and
+deploys by hot-swap, never by recreating the container — `docker compose up -d` recreates if the
+compose file drifted, and that destroys in-container recordings.
+
+**Committing is free; promoting is gated.** The gate hangs off `.githooks/pre-merge-commit` and
+fires only on merges into `staging`, via `./promote.sh <branch>` (always `--no-ff`, because a
+fast-forward makes no merge commit and would slip past the hook). Deliberately not pre-commit: an
+agent commits constantly to save work, and blocking that on a three-minute image build and a live
+meeting makes the swarm slower without making main safer.
+
+This exists because until 2026-08-19 every rung was `docker exec` into an already-running container
+whose bot code was the gitignored `live/` bind-mount, so nothing ever executed `Dockerfile.patched`
+and "proven" meant "passes against the mutated container in front of me". A Dockerfile line that
+could not build sat on main for two days inside a commit titled *"and prove it"*. Test the artifact.
+
 ## What makes iteration cheap
 
 `./hotswap.sh` — surface controllers are `import()`ed fresh per act, keyed on file mtime, so a
