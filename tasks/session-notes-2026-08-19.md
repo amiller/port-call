@@ -66,11 +66,36 @@ Closed by three changes to `bench.sh`:
 3. the DOM fixture rung now runs in a **throwaway container from the image just built**, not in the
    ambient rig — testing the artifact, not the hand-mutated environment.
 
-`./bench.sh` is currently **RED**, correctly, on two real things: `patches/bot-camera.ts` has
-drifted from `live/` (the parked `AVATARS.hancock`; the running bot offers rooster/tina/dmarz, the
-committed patch offers four), and the virtual-mic click-train rung captures silence. The audio red
-is **pre-existing and not understood** — the pulse wiring checks out (`module-remap-source
-master=tts_sink.monitor`), no bot held the device, sinks were SUSPENDED not missing. Not chased.
+Both reds that first run produced are now resolved. The camera drift was real and is gone —
+`patches/bot-camera.ts` (with the parked `AVATARS.hancock`) is deployed to rig 1's `live/`, so
+committed == running and skin-bench passes 4 avatars x 3 backgrounds. The audio red was **not** a
+real failure: the click train was inline in `bench.sh` with a fixed `sleep 1` before playback, and
+pulse leaves both devices SUSPENDED, so on a loaded box `parecord` had not begun capturing when the
+first click played. It is now `probe/audio-bench.sh`, which waits for capture to actually start.
+5/5 deterministic on rig 4, 3/3 on rig 1. **The bot is not inaudible** — an earlier note here said
+it might be, and that was the flaky rung talking.
+
+## The gate (2026-08-19)
+
+- `rig-env.sh` — one `RIG` variable derives container / gateway / token paths, inferred from the
+  directory name. `hotswap.sh`, `demo.sh`, `join-meeting.sh`, `relaunch.sh` all hardcoded rig 1, so
+  a gate run from `~/vexa-rig4` recompiled the human's rig. `e2e.sh` takes a per rig+room `flock`.
+- `gate.sh` — pre-flight build → `deploy-live.sh` → `bench.sh` → `e2e.sh`. **Refuses rig 1** unless
+  `GATE_ALLOW_RIG1=1`. Pre-flight is before the deploy on purpose: deploying an unbuildable tree
+  would leave the staging rig broken by the very check that rejected it.
+- `.githooks/pre-merge-commit` fires **only on merges into `staging`**; `./promote.sh <branch>`
+  merges `--no-ff` (a fast-forward makes no merge commit and would slip past the hook).
+- **Proven both ways.** GATE GREEN on rig 4: bench green + e2e 10/10 in a real room. Then a branch
+  reverting the #16 sink was refused at pre-flight, before the deploy touched the rig.
+- Two bugs the gate found by being run — both now fixed and committed: the hook synced with
+  `rsync --delete-excluded`, which **deletes** excluded paths on the destination (plain `--delete`
+  protects them), and it wiped rig 4's `live/` and `.env`; and the promoted tree overwrote the
+  rig's `docker-compose.yml`, so rig 4 came back trying to bind rig 1's ports. Host ports now come
+  from the rig's own `.env` (`VEXA_GW_PORT` / `VEXA_UI_PORT`, defaulting to rig 1).
+- rig 4's `.env` was restored from its own running container's environment — **not** copied from
+  rig 1, and the value was never printed.
+
+**Three commits on `main`, not pushed.** `origin/main` is 3 behind; pushing is Andrew's call.
 
 ## The post-meeting doc pipeline — BUILT, not yet unattended
 
