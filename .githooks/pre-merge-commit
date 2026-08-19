@@ -17,8 +17,11 @@ HOST=${GATE_HOST:-fractal}
 RIGDIR=${GATE_RIGDIR:-vexa-rig4}
 echo "── staging gate: syncing the merge result to $HOST:$RIGDIR and running ./gate.sh ──"
 
-# live/ is the rig's own compiled tree and .env holds its key: never overwrite either from here.
-rsync -a --delete-excluded \
+# live/ is the rig's own compiled tree and .env holds its key: never touch either from here.
+# --delete (NOT --delete-excluded): plain --delete protects excluded paths on the destination,
+# whereas --delete-excluded deletes them. The first run of this hook used --delete-excluded and
+# wiped the staging rig's entire live/ tree, taking the running bot's source with it.
+rsync -a --delete \
   --exclude '.git' --exclude 'live/' --exclude '.env' --exclude 'artifacts/' --exclude 'tasks/' \
   ./ "$HOST:$RIGDIR/" || { echo "staging gate: rsync to $HOST failed" >&2; exit 1; }
 

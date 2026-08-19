@@ -52,8 +52,12 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
     ports:
-      - "8056:8056"     # gateway (the only front door)
-      - "3000:3000"
+      # Host ports are the ONE thing that differs between the parallel rigs, so they come from the
+      # rig's own .env rather than being baked in. Defaults are rig 1. Rig 4 sets 8059 / 3003.
+      # Before this, promoting a tree to the staging rig overwrote its compose with rig 1's ports
+      # and the container failed to start on "port is already allocated".
+      - "${VEXA_GW_PORT:-8056}:8056"     # gateway (the only front door)
+      - "${VEXA_UI_PORT:-3000}:3000"
     volumes:
       - recordings:/var/lib/vexa/recordings
       # Hot-swap: edit TS on the host, `./hotswap.sh`, spawn a new bot. ~10s instead of a 5-minute
