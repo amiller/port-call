@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Fires when a merge into `staging` is about to be committed. Anything else — including every commit
+# on main and on a swarm branch — passes straight through untouched.
+#
+# Why here and not pre-commit: an agent commits constantly to save work, and blocking that on a
+# 3-minute image build plus a live meeting would make the swarm slower without making anything
+# safer. Promotion to staging is the first moment "this actually works" has to be true, so it is the
+# first moment worth paying for.
+#
+# Note this only fires on a real merge commit. promote.sh always merges --no-ff for exactly that
+# reason: a fast-forward creates no merge commit and would slip past this hook.
+set -uo pipefail
+BR=$(git rev-parse --abbrev-ref HEAD)
+[ "$BR" = staging ] || exit 0
+
+HOST=${GATE_HOST:-fractal}
+RIGDIR=${GATE_RIGDIR:-vexa-rig4}
+echo "── staging gate: syncing the merge result to $HOST:$RIGDIR and running ./gate.sh ──"
+
+# live/ is the rig's own compiled tree and .env holds its key: never touch either from here.
+# --delete (NOT --delete-excluded): plain --delete protects excluded paths on the destination,
+# whereas --delete-excluded deletes them. The first run of this hook used --delete-excluded and
+# wiped the staging rig's entire live/ tree, taking the running bot's source with it.
+rsync -a --delete \
+  --exclude '.git' --exclude 'live/' --exclude '.env' --exclude 'artifacts/' --exclude 'tasks/' \
+  ./ "$HOST:$RIGDIR/" || { echo "staging gate: rsync to $HOST failed" >&2; exit 1; }
+
+ssh "$HOST" "cd $RIGDIR && ./gate.sh" || {
+  echo >&2
+  echo "staging gate RED — merge refused. Fix it on the branch, or 'git merge --abort'." >&2
+  exit 1
+}

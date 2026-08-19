@@ -23,11 +23,10 @@
 # The one exception is the camera HUD's page-side canvas, installed at navigation: use `./demo.sh
 # recam` to re-inject it without rejoining.
 set -euo pipefail
-C=${C:-vexa-rig-vexa-lite-1}
-GW=http://localhost:8056
+. "$(dirname "$0")/rig-env.sh"   # RIG selects the rig; see rig-env.sh
 ROOM=${ROOM:-tog-tccc-szk}
 STATE=/tmp/vexa-demo-bot
-BOT=$(cat /tmp/vexa-bot-token.txt)
+BOT=$(cat "$TOKBOT")
 pub() { docker exec "$C" redis-cli PUBLISH "bot_commands:meeting:$(cat $STATE)" "$1" >/dev/null && echo "-> $1"; }
 need() { [ -f "$STATE" ] || { echo "no demo bot — run: ./demo.sh join"; exit 1; }; }
 
@@ -65,7 +64,7 @@ print(json.dumps(a))' "${2:-VEXA}" "${3:-}" "${4:-}")" ;;
   log)     need; docker exec "$C" sh -c "tail -${2:-20} /tmp/vexa-workloads/mtg-$(cat $STATE)-*.log" ;;
   # Completed segments only: vexa resubmits each utterance as a GROWING window, so provisional
   # ones make a polling agent see the same sentence half-a-dozen times and act on it repeatedly.
-  transcript) curl -s "$GW/transcripts/google_meet/$ROOM" -H "X-API-Key: $(cat /tmp/vexa-tx-token.txt)" \
+  transcript) curl -s "$GW/transcripts/google_meet/$ROOM" -H "X-API-Key: $(cat "$TOKTX")" \
       | python3 -c "
 import sys,json
 segs=json.load(sys.stdin).get('segments') or []

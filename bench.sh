@@ -5,34 +5,42 @@
 #
 #   ./bench.sh
 set -uo pipefail
-C=${C:-vexa-rig-vexa-lite-1}
 FAIL=0
 
+D="$(dirname "$0")"
+. "$D/rig-env.sh"   # RIG selects the rig; see rig-env.sh
+
+# Rungs 1 and 2 need no container, and they are the two this suite structurally lacked until
+# 2026-08-19. Everything below them is `docker exec` into an ALREADY-RUNNING container, whose bot
+# code is the live/ bind-mount that hotswap.sh compiles in place — so no rung here ever executed
+# Dockerfile.patched. That is how a Dockerfile line that could not build (and could not have worked
+# if it had) sat on main from 2026-08-17 to 2026-08-19 inside a commit titled "and prove it".
+echo "== image: Dockerfile.patched builds, and its own COPY/grep guards hold =="
+docker build -f "$D/Dockerfile.patched" -t vexa-lite:bench "$D" >/tmp/bench-build.log 2>&1 \
+  && echo "PASS image builds" \
+  || { echo "FAIL image build — tail of /tmp/bench-build.log:"; tail -15 /tmp/bench-build.log; FAIL=1; }
+
+# The image is only half the story: live/ is what actually runs, and it is gitignored, so
+# "committed" and "deployed" are separate states with nothing comparing them. #16 lived in that gap
+# for a week — fixed in live/, absent from the image, and populate-live.sh seeds live/ FROM the
+# image, so a fresh clone would have restored the version that destroys audio.
+echo "== drift: committed patches/ vs the live/ tree that actually runs =="
+DRIFT=0
+for f in "$D"/patches/bot-*.ts; do
+  n=$(basename "$f" .ts); n=${n#bot-}
+  L="$D/live/services-bot-src/$n.ts"
+  [ -f "$L" ] || { echo "  MISSING live/services-bot-src/$n.ts"; DRIFT=1; continue; }
+  cmp -s "$f" "$L" || { echo "  DRIFT patches/bot-$n.ts != live/services-bot-src/$n.ts"; DRIFT=1; }
+done
+cmp -s "$D/patches/browser-args.ts" "$D/live/modules-join-src/browser-args.ts" \
+  || { echo "  DRIFT patches/browser-args.ts"; DRIFT=1; }
+cmp -s "$D/patches/gmeet-selectors.ts" "$D/live/modules-join-src/googlemeet/selectors.ts" \
+  || { echo "  DRIFT patches/gmeet-selectors.ts"; DRIFT=1; }
+[ "$DRIFT" -eq 0 ] && echo "PASS patches/ == live/" || FAIL=1
+
 echo "== audio: click train (paplay rate/channels) =="
-docker exec "$C" bash -c '
-python3 -c "
-import struct
-sr=24000; n=sr*3; d=[0]*n
-for k in range(3):
-    for i in range(200): d[k*sr+i]=20000 if i%2==0 else -20000
-open(\"/tmp/clicks.pcm\",\"wb\").write(b\"\".join(struct.pack(\"<h\",x) for x in d))
-"
-pactl set-sink-mute tts_sink 0 >/dev/null; pactl set-source-mute virtual_mic 0 >/dev/null
-parecord --device=virtual_mic --file-format=wav /tmp/c.wav & REC=$!
-sleep 1; paplay --raw --format=s16le --rate=24000 --channels=1 --device=tts_sink /tmp/clicks.pcm
-sleep 1; kill $REC 2>/dev/null; sleep 1
-python3 -c "
-import wave,struct,sys
-w=wave.open(\"/tmp/c.wav\"); n=w.getnframes(); ch=w.getnchannels(); sr=w.getframerate()
-d=struct.unpack(f\"<{n*ch}h\", w.readframes(n)); pk=max(abs(x) for x in d)
-hits=[]; last=-9999
-for i,x in enumerate(d):
-    if abs(x)>pk*0.5 and i-last>sr*ch*0.3: hits.append(i/ch/sr); last=i
-gaps=[hits[i+1]-hits[i] for i in range(len(hits)-1)]
-r=sum(gaps)/len(gaps) if gaps else 0
-print(f\"PASS audio ratio={r:.3f}\" if 0.95<r<1.05 else f\"FAIL audio ratio={r:.3f} (want 1.000)\")
-sys.exit(0 if 0.95<r<1.05 else 1)
-"' || FAIL=1
+docker cp "$D/probe/audio-bench.sh" "$C:/tmp/audio-bench.sh" >/dev/null
+docker exec "$C" bash /tmp/audio-bench.sh || FAIL=1
 
 echo "== camera + getDisplayMedia patch =="
 docker cp "$(dirname "$0")/probe/camera-bench.mjs" "$C:/tmp/camera-bench.mjs" >/dev/null
@@ -63,16 +71,20 @@ docker cp "$(dirname "$0")/probe/chat-guard-bench.mjs" "$C:/tmp/chat-guard-bench
 docker exec "$C" node /tmp/chat-guard-bench.mjs | tail -1 || FAIL=1
 
 echo "== DOM fixture tests: selector ambiguity detection =="
-docker exec "$C" mkdir -p /tmp/fixtures
-docker cp "$(dirname "$0")/probe/fixture-tests.mjs" "$C:/tmp/fixture-tests.mjs" >/dev/null
-docker cp "$(dirname "$0")/probe/fixtures/populated-call.html" "$C:/tmp/fixtures/" >/dev/null
-docker cp "$(dirname "$0")/probe/fixtures/no-bot-mic.html" "$C:/tmp/fixtures/" >/dev/null
-docker cp "$(dirname "$0")/probe/fixtures/picker-closed.html" "$C:/tmp/fixtures/" >/dev/null
-docker cp "$(dirname "$0")/probe/fixtures/pre-join-only.html" "$C:/tmp/fixtures/" >/dev/null
-# NODE_PATH: the suite runs from /tmp, and jsdom is installed in the image at /app/node_modules.
-# Without this, node's upward resolution from /tmp never reaches it and the rung dies on a missing
-# package — which is how this rung silently never ran at all until 2026-08-17.
-docker exec "$C" sh -c "cd /tmp/fixtures && NODE_PATH=/app/node_modules node /tmp/fixture-tests.mjs" || FAIL=1
+# This rung runs in a THROWAWAY container from the image rung 1 just built — not in $C, the
+# ambient rig. That distinction is the whole lesson of 2026-08-19: $C is a long-lived container
+# from a week-old image with a hand-compiled live/ mount, so a rung exec'd into it proves nothing
+# about the artifact a fresh machine would get. Testing the built image is what "proven" has to mean.
+# It runs from /opt/probe because that is the only directory node resolves `jsdom` from — ESM
+# ignores NODE_PATH — and fixture-tests.mjs reads fixtures from its OWN directory, so both go there.
+P=$(docker run -d --rm --entrypoint sleep vexa-lite:bench 300)
+docker exec "$P" mkdir -p /opt/probe/fixtures
+docker cp "$D/probe/fixture-tests.mjs" "$P:/opt/probe/fixture-tests.mjs" >/dev/null
+for f in populated-call no-bot-mic picker-closed pre-join-only; do
+  docker cp "$D/probe/fixtures/$f.html" "$P:/opt/probe/fixtures/" >/dev/null
+done
+docker exec "$P" node /opt/probe/fixture-tests.mjs || FAIL=1
+docker rm -f "$P" >/dev/null
 
 echo
 [ "$FAIL" -eq 0 ] && echo "BENCH GREEN" || echo "BENCH RED"

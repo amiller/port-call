@@ -11,16 +11,23 @@ set -euo pipefail
 # The permanent lab room (Meet API space, accessType=OPEN, minted by lab-room.py). Unlike an
 # ad-hoc Quick-access room it does NOT die when the call ends, so this runs unattended forever.
 CODE=${1:-tog-tccc-szk}
-C=${C:-vexa-rig-vexa-lite-1}
-GW=http://localhost:8056
-BOT=$(cat /tmp/vexa-bot-token.txt); TX=$(cat /tmp/vexa-tx-token.txt)
+# RIG selects which parallel rig to run against — see rig-env.sh. Swarm agents use a rig that is
+# not 1 so they never spawn a bot into, or DELETE a bot out of, the rig a human is in a meeting on.
+. "$(dirname "$0")/rig-env.sh"
+rig_require_tokens
+BOT=$(cat "$TOKBOT"); TX=$(cat "$TOKTX")
+# The first thing this script does is DELETE every bot in $CODE on this rig, so two concurrent runs
+# sharing a rig+room would tear down each other's bot mid-assertion and both report nonsense.
+# Serialize instead: a second run waits rather than corrupting the first.
+exec 9>"/tmp/vexa-e2e-$RIG-$CODE.lock"
+flock -w 600 9 || { echo "FAIL another e2e is holding rig $RIG / room $CODE" >&2; exit 1; }
 PASS=0; FAIL=0
 # RECORD=1 captures the bot's own X display: a screenshot after every surface act plus an mp4 of
 # the whole run, then an HTML report. The bot has a real desktop (Xvfb :99), so this is what the
 # meeting actually looked like from its seat — not a reconstruction.
 REC=${RECORD:-0}
 STAMP=$(date +%Y%m%d-%H%M%S)
-ART=~/vexa-rig/artifacts/$STAMP
+ART=$RIGDIR/artifacts/$STAMP
 STEPS=""
 shot() {
   [ "$REC" = 1 ] || return 0

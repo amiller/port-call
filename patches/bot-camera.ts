@@ -132,6 +132,106 @@ export function installHud(): void {
     ctx.restore();
   };
 
+  // Hancock — Andrew's actual rooster, from photo reference, front on. Where AVATARS.rooster is a
+  // pale cartoon, this one is the bird: a close crop where deep red fleshy face fills the frame,
+  // a heavy comb that flops rather than scallops, a bone-coloured beak (not the cartoon orange),
+  // and an amber iris. Same contract and the same derived state as every other avatar — the beak
+  // still opens on real RMS with no floor, because a mouth that moves on a timer lies.
+  AVATARS.hancock = (cx: any, cy: any, sc: any, t: any, state: any) => {
+    const bob = Math.sin(t / (state === 'listening' ? 7 : 15)) * (state === 'listening' ? 9 : 4);
+    const sway = Math.sin(t / 33) * 0.05;
+    const bp = t % 240;
+    const blink = bp < 7 || (bp > 15 && bp < 21);
+
+    let beak = 0;
+    if (state === 'winding-up') {
+      const windAge = t - S.windUpStart;
+      beak = windAge < 30 ? Math.sin(windAge / 3) * 6 : 0;
+    } else if (state === 'speaking') {
+      beak = Math.min(S.amplitude * 120, 35);
+    }
+
+    const RED = '#a81b22', RED_HI = '#c9313a', RED_SH = '#6f1016';
+    const BONE = '#e7dcb4', BONE_SH = '#c2b489';
+
+    ctx.save();
+    ctx.translate(cx, cy + bob); ctx.rotate(sway); ctx.scale(sc, sc);
+
+    // hackle feathers behind — tan, the only warm non-red in the reference
+    ctx.fillStyle = '#a8631f';
+    ctx.beginPath(); ctx.ellipse(0, 210, 168, 130, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#7d4715';
+    for (let i = -3; i <= 3; i++) {
+      ctx.beginPath();
+      ctx.ellipse(i * 42, 190 + Math.abs(i) * 9, 15, 54, i * 0.16, 0, 7);
+      ctx.fill();
+    }
+
+    // comb — one heavy mass that flops right, not neat scallops. Lobes overlap into a single
+    // silhouette so it reads as flesh rather than a cockscomb icon.
+    const flop = Math.sin(t / 11) * 6;
+    ctx.fillStyle = RED;
+    for (let i = 0; i < 5; i++) {
+      const lx = -74 + i * 38, drop = i * 5;
+      ctx.beginPath();
+      ctx.ellipse(lx + flop * (i / 4), -128 + drop + Math.sin(t / 9 + i) * 4, 34, 30 - i * 2, 0.25, 0, 7);
+      ctx.fill();
+    }
+    ctx.fillStyle = RED_HI;
+    ctx.beginPath(); ctx.ellipse(-52 + flop * 0.3, -140, 26, 15, 0.2, 0, 7); ctx.fill();
+
+    // face — the close crop: red fills the frame, no white cartoon head
+    ctx.fillStyle = RED;
+    ctx.beginPath(); ctx.ellipse(0, -22, 132, 126, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = RED_SH;                                   // cheek hollows
+    ctx.beginPath(); ctx.ellipse(-88, 10, 30, 52, 0.3, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(88, 10, 30, 52, -0.3, 0, 7); ctx.fill();
+    ctx.fillStyle = RED_HI;                                   // brow ridge catching light
+    ctx.beginPath(); ctx.ellipse(0, -86, 96, 34, 0, 0, 7); ctx.fill();
+
+    // eyes — amber iris on a dark lid, both visible so it looks AT you
+    for (const ex of [-54, 54]) {
+      ctx.fillStyle = '#2a1109';
+      ctx.beginPath(); ctx.ellipse(ex, -44, 34, blink ? 5 : 33, 0, 0, 7); ctx.fill();
+      if (!blink) {
+        const look = state === 'listening' ? Math.sin(t / 18) * 7 : 0;
+        ctx.fillStyle = '#d9822b';
+        ctx.beginPath(); ctx.arc(ex + look, -42, 20, 0, 7); ctx.fill();
+        ctx.fillStyle = '#140b06';
+        ctx.beginPath(); ctx.arc(ex + look, -42, 10, 0, 7); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(ex + look + 7, -50, 5, 0, 7); ctx.fill();
+      } else {
+        ctx.strokeStyle = '#2a1109'; ctx.lineWidth = 6;
+        ctx.beginPath(); ctx.moveTo(ex - 30, -44); ctx.lineTo(ex + 30, -44); ctx.stroke();
+      }
+    }
+
+    // beak — bone, upper mandible fixed, lower drops with amplitude
+    ctx.fillStyle = BONE;
+    ctx.beginPath(); ctx.moveTo(-36, 6); ctx.lineTo(36, 6); ctx.lineTo(0, 62); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = BONE_SH;
+    ctx.beginPath(); ctx.moveTo(-36, 6); ctx.lineTo(0, 20); ctx.lineTo(0, 62); ctx.closePath(); ctx.fill();
+    if (beak > 1) {
+      ctx.fillStyle = '#5e0f14';                              // open throat, not a lighter beak
+      ctx.beginPath(); ctx.moveTo(-26, 14); ctx.lineTo(26, 14); ctx.lineTo(0, 62 + beak); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = BONE_SH;
+      ctx.beginPath(); ctx.moveTo(-26, 40 + beak * 0.5); ctx.lineTo(26, 40 + beak * 0.5);
+      ctx.lineTo(0, 62 + beak); ctx.closePath(); ctx.fill();
+    }
+
+    // wattles — long and heavy, swinging off the jaw with the beak
+    ctx.fillStyle = RED;
+    for (const wx of [-30, 30]) {
+      ctx.beginPath();
+      ctx.ellipse(wx, 92 + beak * 0.45, 22, 44 + beak * 0.3, wx < 0 ? 0.12 : -0.12, 0, 7);
+      ctx.fill();
+    }
+    ctx.fillStyle = RED_SH;
+    ctx.beginPath(); ctx.ellipse(-30, 108 + beak * 0.45, 9, 20, 0.12, 0, 7); ctx.fill();
+    ctx.restore();
+  };
+
   // Tina — the flashbotsX rubiks bot. Mouth slot opens with amplitude; the top row twists like a
   // cube face on speaker change, and the bolt flickers while speaking.
   AVATARS.tina = (cx: any, cy: any, sc: any, t: any, state: any) => {

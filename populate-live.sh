@@ -17,4 +17,11 @@ for pair in services/bot:services-bot modules/join:modules-join; do
     docker cp "$C:/app/core/meetings/$IN/$d/." "live/$OUT-$d/"
   done
 done
+# The one invariant worth asserting here: live/ is the code that RUNS, and this script is the only
+# thing that writes it from the image. #16 — the recorder overwriting a finished recording with a
+# trailing fragment — destroyed three meetings' audio and reported success. If a stale image ever
+# seeds live/ again, that silence comes back, so fail loudly instead.
+grep -q "DROPPED shrinking" live/services-bot-src/recording.ts \
+  || { echo "live/services-bot-src/recording.ts lacks the #16 non-shrinking sink — stale image" >&2; exit 1; }
+
 echo "live/ populated:"; du -sh live/*
