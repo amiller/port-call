@@ -37,3 +37,9 @@ rsync -a --delete --exclude '.git' --exclude 'live/' --exclude '.env' \
 
 echo "── deploying and re-checking on rig 1 ──"
 ssh "$HOST" "cd $RIGDIR && ./deploy-live.sh && ./bench.sh"
+
+# main means "what is on prod". Nothing else moves it, so reading `main` answers the question the
+# rig cannot: which commit is Andrew's meetings actually running. staging is always at or ahead of it.
+git branch -f main "$REF"
+echo
+echo "prod (rig 1) now running $(git rev-parse --short "$REF"); main moved to match."
