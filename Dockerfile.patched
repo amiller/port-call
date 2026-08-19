@@ -52,16 +52,30 @@ COPY patches/bot-camera.ts /app/core/meetings/services/bot/src/camera.ts
 COPY patches/bot-reactions.ts /app/core/meetings/services/bot/src/reactions.ts
 COPY patches/bot-selfcheck.ts /app/core/meetings/services/bot/src/selfcheck.ts
 COPY patches/bot-index.ts /app/core/meetings/services/bot/src/index.ts
+# 4. RECORDER CLOBBER (#16). Both the is_final chunk and close(key) assemble a master for the same
+#    key, and the second one — a lone trailing fragment, no EBML cluster, unrepairable — landed on
+#    the path the first had just written. Three of four meetings on 2026-08-12 lost their audio
+#    that way, ~133 MB, and nothing reported an error. This sink keeps the largest master per key.
+#    It MUST be baked: populate-live.sh seeds the live/ bind-mounts FROM this image, so an image
+#    without it hands a fresh clone the destroying version.
+COPY patches/bot-recording.ts /app/core/meetings/services/bot/src/recording.ts
 
 RUN cd /app/core/meetings/modules/join && /app/node_modules/.bin/tsc \
  && grep -q auto-select-tab-capture-source-by-title dist/browser-args.js \
  && ! grep -qE "^\s*'\[role=\"alert(dialog)?\"\]'," dist/googlemeet/selectors.js \
     || (echo "join dist: tab-capture flag missing, or bare role=alert still a removal indicator" && exit 1)
-# jsdom is what the DOM fixture rung parses saved populated-call snapshots with. It is not an
-# app dependency — the bot uses a real browser — but without it that rung dies on "Cannot find
-# package 'jsdom'". It had been failing that way unnoticed since the rung was added, because the
-# error came after an unrelated one and nobody read past it.
-RUN cd /app && npm install --no-save jsdom
+# jsdom is what the DOM fixture rung parses saved populated-call snapshots with. It is a harness
+# dependency, not an app one — the bot uses a real browser — so it gets its own tree at /opt/probe
+# and never touches /app. Two reasons that matters, both learned the hard way on 2026-08-19:
+#   - /app is a pnpm tree (see `packageManager` in its package.json). `npm install` there makes
+#     arborist walk pnpm's symlinks and die on `Cannot read properties of null (reading 'matches')`,
+#     which is why NO image built between 2026-08-17 and 2026-08-19.
+#   - node's ESM resolver ignores NODE_PATH, so pointing it at /app/node_modules could never have
+#     resolved `import { JSDOM } from 'jsdom'` anyway. bench.sh runs the rung FROM /opt/probe so
+#     ordinary upward resolution finds it.
+RUN mkdir -p /opt/probe && cd /opt/probe && npm init -y >/dev/null \
+ && npm install --no-audit --no-fund jsdom \
+ && node -e "import('jsdom').then(m => { if (!m.JSDOM) process.exit(1) })"
 
 RUN cd /app/core/meetings/services/bot && /app/node_modules/.bin/tsc \
  && grep -q screen_share dist/contracts.js \
@@ -70,4 +84,5 @@ RUN cd /app/core/meetings/services/bot && /app/node_modules/.bin/tsc \
  && grep -q getDisplayMedia dist/camera.js \
  && grep -q createChatController dist/chat.js \
  && grep -q createReactionController dist/reactions.js \
-    || (echo "screen_share missing from bot dist" && exit 1)
+ && grep -q 'DROPPED shrinking' dist/recording.js \
+    || (echo "bot dist: screen_share missing, or the #16 non-shrinking recorder sink is absent" && exit 1)

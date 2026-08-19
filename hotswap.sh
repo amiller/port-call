@@ -5,7 +5,8 @@
 # dist/ while any live bot keeps running untouched. Edit ~/vexa-rig/live/*-src on the host, run
 # this, spawn a bot. ~10s vs the ~5min rebuild+redeploy cycle.
 set -euo pipefail
-C=${C:-vexa-rig-vexa-lite-1}
+. "$(dirname "$0")/rig-env.sh"   # RIG picks the container; hardcoding rig 1 here meant a gate
+                                 # run from ~/vexa-rig4 recompiled the human's rig instead.
 for m in modules/join services/bot; do
   echo "tsc $m"
   docker exec "$C" sh -c "cd /app/core/meetings/$m && /app/node_modules/.bin/tsc"

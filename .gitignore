@@ -13,3 +13,4 @@ stage-zed-secrets.sh
 # Scratch avatar forks and the synthetic-meeting media (hundreds of MB of wav/mp4). The avatars
 # themselves now live in the registry in patches/bot-camera.ts.
 avatars/
+archive/

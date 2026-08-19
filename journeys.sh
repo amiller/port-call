@@ -16,9 +16,9 @@
 set -euo pipefail
 MODE=${MODE:-full}
 CODE=${1:?usage: [MODE=observe] ./journeys.sh <meet-code>}
-C=${C:-vexa-rig-vexa-lite-1}
-GW=http://localhost:8056
-BOT=$(cat /tmp/vexa-bot-token.txt); TX=$(cat /tmp/vexa-tx-token.txt)
+. "$(dirname "$0")/rig-env.sh"   # RIG selects the rig; see rig-env.sh
+rig_require_tokens
+BOT=$(cat "$TOKBOT"); TX=$(cat "$TOKTX")
 PASS=0; FAIL=0; SKIP=0
 ok()   { echo "PASS $*"; PASS=$((PASS+1)); }
 bad()  { echo "FAIL $*"; FAIL=$((FAIL+1)); }

@@ -213,3 +213,88 @@ and per-rig forks. Fold them into the repo:
       at join (current workaround: xdotool click ~(957,707) on :99).
 - [ ] Document: the big canvas headline is a DERIVED active-speaker label (whoever that bot last
       heard), not the camera_show text — reads as crossed names until you know.
+
+## 2026-08-18 act logs and recordings were never persisted — archived, nightly backup installed
+
+Found while asking whether the reaction/speak events from a live meeting survive. They did not.
+`docker inspect vexa-rig-vexa-lite-1` mounts only bot/join src+dist and `vexa-rig_recordings`;
+`/tmp/vexa-workloads/` (every `[bot] speak` / `[chat]` / `[reaction]` / `[camera]`) and
+`/tmp/recording_*.webm` are on the container's writable layer. The recordings volume that IS
+mounted was empty — the recorder writes to /tmp instead. Postgres has `vexa-rig_pgdata`, so
+transcripts were the only thing a `--force-recreate` would have spared.
+
+Done: 1.2GB rescued to `/media/amiller/fractal-nvme2/vexa-archive/` (root is at 93%; the nvme2
+drive has 171G). Per-rig `logs/` + `recordings/`, plus `pgdump/`. rig1 dump restore-tested into a
+scratch db — 96 meetings / 5496 transcriptions against 5497 live. `backup.sh` there is idempotent
+and runs 04:15 nightly via cron; logs+dumps also rsynced to `archive/` in this repo (gitignore it).
+NOTE: fractal's host `pg_restore` is too old to read these dumps — use the one in the container.
+
+- [ ] Bind-mount `/tmp/vexa-workloads` and point the recorder at `/var/lib/vexa/recordings`, so
+      this stops depending on a cron winning a race with a container recreate. Needs a recreate,
+      which is exactly the event that destroys the data — archive first, always.
+### Raw audio: it was never lost, it was unreadable (2026-08-18)
+
+Issue #11 says audio "is dropped" and a post-pass is "currently impossible". That premise is
+wrong. The recorder writes a full-meeting Opus stream to `/tmp/recording_<id>_<uid>.webm` — but it
+concatenates MediaRecorder chunks WITHOUT the init segment, so every file starts mid-cluster and
+no decoder opens it. Exactly one archived file (recording_87) kept its header.
+
+Prepending that 146-byte EBML+Tracks preamble to the first whole cluster makes them decodable.
+Meeting 99 recovered 1,565,348 kB of PCM = 2h16m at 48k stereo, matching its 13:04-15:25 wall
+clock. Backfilled the archive: 28 repaired, 3 already valid, 9 too short to hold a cluster (all
+under 170KB, dead test bots). `webm-init.bin` + `repair.py` live in the archive; `backup.sh`
+now repairs and ffprobe-verifies every recording as it copies it out.
+
+Retention: 21 days on archived audio, in backup.sh. Nothing qualifies yet (oldest is 2026-08-12),
+so the first deletion happens ~2026-09-02. Rate is ~60MB/hour at the current stereo 133kbps —
+roughly 5GB per 21 days at 4h/day, against 171G free. Mono at 32kbps would cut that ~10x.
+
+- [ ] Prune `/tmp/recording_*.webm` inside the containers after a verified archive — it grows
+      unbounded until a recreate, and a recreate is the thing that loses it.
+- [ ] Decide stereo-133k vs mono-32k at the recorder, per #11's "encode, do not store raw".
+- [ ] `credentials.md`: what the rig retains and for how long. #11 lists it as done-when, and
+      21 days of other people's voices is the kind of thing disclosed, not discovered.
+- [ ] Fix the recorder to emit the header itself, so repair.py stops being load-bearing.
+- [ ] Acts to a table keyed by meeting_id, with an emit timestamp. The log lines carry NO
+      wall-clock time; ordering against `[SpeakerStreams]` events is recoverable, exact latency is
+      not. "Which reaction landed, when, against which transcript line" is the signal worth having
+      (Andrew 2026-08-18: "getting reactions from people is incredible alpha").
+
+## 2026-08-18 night — reboot recovery and the recorder clobber, both fixed
+
+fractal rebooted at 15:36 EDT and the rig did not come back. The host `/tmp` was wiped, taking the
+API tokens with it, so `board.py` died on startup with FileNotFoundError and the console at
+192.168.100.4:8090 was dead. The overlay was never the problem — ping and ssh were fine throughout.
+
+`relaunch.sh` exists precisely to recover from this, and was itself broken on fractal in two ways:
+
+- It sourced `~/projects/ic3camp-teexai/teexai-transcribe/.env` for NEAR_API_KEY. That path does not
+  exist on fractal, and with `set -e` recovery aborted at line 14 — every reboot, silently. The key
+  is already in `~/vexa-rig/.env`, which docker compose reads natively, so the line was vestigial.
+- admin-api reports healthy before postgres accepts writes, so the user-create returned a non-JSON
+  error page and the script died on the parse. Now retried for up to 2 minutes, then fails loudly.
+
+Both fixed, `relaunch.sh` run end to end (containers reconciled, NOT recreated — data intact), and
+an `@reboot` cron installed. Recovery is now automatic.
+
+- [ ] The @reboot path is proven by running the script, not by an actual reboot. Verify on the next
+      real one, and note `docker compose up -d` will recreate containers if the compose file has
+      drifted since they were built — which destroys the in-container recordings. Archive first.
+
+### #16 recorder clobber — fixed
+
+Sink wrapper now keeps the largest master per key and drops any later one that would shrink it.
+Deployed with `hotswap.sh`. Test bot 106: is_final 24816B, session-close 464B, `DROPPED shrinking
+master` logged, 24816B on disk. Before tonight that file would have been 464B.
+
+- [ ] Confirm on a 30+ minute call — ffprobe duration against wall clock. Tomorrow's first meeting.
+- [ ] Why meeting 99 survived the old bug is still unexplained.
+
+### Also tonight
+
+- `live.sh <meet-code>` — joins, waits for the meeting row, starts the forwarder, prints the
+  shareable link. Tested end to end (bot 105, page reported known:true). `fwd.py` moved out of
+  /tmp into the repo, where the reboot cannot eat it.
+- `backup.sh` aborted on the first unrepairable recording, taking the postgres dumps with it —
+  one bad webm would have killed tonight's 04:15 cron entirely. Now keeps it as `.raw`, reports it
+  by name, counts it in the summary line, and continues.
