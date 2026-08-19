@@ -56,6 +56,26 @@ rig+room `flock`, so two agents queue rather than killing each other's bot mid-a
 | `RIG=4 ./e2e.sh <code>` | a standing open lab room |
 | `./gate.sh` (from `~/vexa-rig4`) | pre-flight build → deploy → bench → e2e. Refuses rig 1. |
 
+### staging and prod
+
+There are two environments, and they are rigs, not branches:
+
+| | | |
+|---|---|---|
+| **staging** | rig 4 | moves **by itself** when a branch passes the gate |
+| **prod** | rig 1 — the rig Andrew takes meetings on | moves only when a human runs `./deploy-prod.sh` |
+
+This is the split the oauth3 side already uses: agents commit to branches and never deploy, and
+staging vs prod is a *deploy target* rather than a branch (`deploy-staging-core.sh` /
+`deploy-prod-core.sh`, each taking a git ref). The one thing added here is that landing on staging
+is automatic — an agent runs `./promote.sh <branch>` itself and the merge happens if the gate is
+green. Nobody shepherds branches into a shared stream by hand.
+
+`deploy-prod.sh` refuses any ref that is not staging or an ancestor of it, so code that skipped the
+gate cannot reach the rig Andrew is in a meeting on. It archives before it touches anything and
+deploys by hot-swap, never by recreating the container — `docker compose up -d` recreates if the
+compose file drifted, and that destroys in-container recordings.
+
 **Committing is free; promoting is gated.** The gate hangs off `.githooks/pre-merge-commit` and
 fires only on merges into `staging`, via `./promote.sh <branch>` (always `--no-ff`, because a
 fast-forward makes no merge commit and would slip past the hook). Deliberately not pre-commit: an
