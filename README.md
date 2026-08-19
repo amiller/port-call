@@ -1,4 +1,4 @@
-# vexa-poc — an interactive Google Meet participant, built on Vexa
+# Port Call — an interactive Google Meet participant, built on Vexa
 
 A proof of concept that turns [Vexa](https://github.com/Vexa-ai/vexa) (Apache-2.0) from a
 *transcription* bot into a bot that **acts in the meeting**: it speaks, posts and reads chat, sends

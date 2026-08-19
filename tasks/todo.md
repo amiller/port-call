@@ -298,3 +298,43 @@ master` logged, 24816B on disk. Before tonight that file would have been 464B.
 - `backup.sh` aborted on the first unrepairable recording, taking the postgres dumps with it —
   one bad webm would have killed tonight's 04:15 cron entirely. Now keeps it as `.raw`, reports it
   by name, counts it in the summary line, and continues.
+
+## Rename to Port Call — phased plan (2026-08-19)
+
+Three things are called "vexa" here and only the first is the project. Ordered by value-per-risk.
+
+### Phase 1 — prose identity  [DONE]
+- [x] `README.md`, `docs/index.md`, `docs/_config.yml`, `NOTICE` ("Port Call (formerly vexa-poc)")
+- [x] The published atlas artifact
+- [x] New registry images: `ghcr.io/amiller/port-call-lite`, `-shims`
+- Cost: none. Nothing resolves these strings.
+
+### Phase 2 — the name in the room  (issue #25, ~30 min)
+- [ ] `board.py:299` `"bot_name": "Vexa"`, `demo.sh:37` `${BOT_NAME:-Vexa}`,
+      `e2e.sh:45` `"Vexa E2E"`, `journeys.sh:54` `"Vexa Journeys"`
+- [ ] **Add the new display name to `roster.json` as `{"bot": true}` BEFORE the first meeting.**
+      The roster keys on the Meet display name; renaming the bot without this makes the next
+      `postdoc.py` run roster-block on an unknown speaker. This is the one trap in Phase 2.
+- Cost: near zero, no infra touched. Highest visible value — it is the name participants read.
+
+### Phase 3 — the GitHub repo  (~15 min, one-way-ish)
+- [ ] Rename `amiller/vexa-poc` → `port-call`; `git remote set-url origin`
+- [ ] Optionally rename the local checkout `~/projects/vexa-poc`
+- GitHub permanently redirects the old URLs, so the 10 issue links in `docs/` keep working and
+  are worth leaving alone rather than rewriting.
+- **Do it before the first push.** `origin/main` is currently behind by a full day's work, so
+  right now the rename costs nothing; after pushing, other clones inherit the old name.
+
+### Phase 4 — infrastructure  [BLOCKED — do not start]
+Would touch: 4 rig dirs, 18 containers, 8 volumes, 2 crontab lines, the archive root, the
+`/tmp/vexa-*-token.txt` paths, `rig-env.sh`'s derivation, `backup.sh`, and the compose project
+name (which comes from the directory name).
+
+**Blocked by #26.** Renaming the directories changes the compose project name, which recreates
+every container — and #26 means recordings currently exist ONLY in a container's `/tmp`. Doing
+this today would destroy meeting audio to achieve a cosmetic change. Revisit only after #26
+persists recordings to a volume, and even then the value is low: these strings are what
+`docker`, the gate, the crontab and the archive resolve, and nobody outside sees them.
+
+### Never rename
+`vexaai/vexa-lite`, `@vexa/join` — upstream software, and what `docker pull` resolves.

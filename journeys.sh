@@ -51,7 +51,7 @@ if [ "$MODE" = full ]; then
   sleep 8
   T0=$(date +%s)
   ID=$(curl -s -X POST $GW/bots -H "X-API-Key: $BOT" -H "Content-Type: application/json" \
-    -d "{\"platform\":\"google_meet\",\"native_meeting_id\":\"$CODE\",\"bot_name\":\"Vexa Journeys\",\"voice_agent_enabled\":true}" \
+    -d "{\"platform\":\"google_meet\",\"native_meeting_id\":\"$CODE\",\"bot_name\":\"Port Call Journeys\",\"voice_agent_enabled\":true}" \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))")
   [ -n "$ID" ] || { echo "FAIL spawn rejected — stale meeting row? ./demo.sh stop, wait 8s"; exit 1; }
   for _ in $(seq 1 24); do S=$(api status); [ "$S" = active ] && break; [ -z "$S" ] && break; sleep 5; done

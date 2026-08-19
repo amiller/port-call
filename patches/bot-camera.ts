@@ -35,8 +35,19 @@ export function installHud(): void {
   const S: any = { title: 'VEXA', sub: '', lines: [] as string[], speaker: '', segments: 0,
                    lastAt: 0, started: Date.now(), frames: 0, speaking: false,
                    windingUp: false, windUpStart: 0, amplitude: 0,
-                   avatar: 'rooster', bg: 'transcript', speakerAt: 0, pose: 'idle' };
+                   avatar: 'rooster', bg: 'transcript', speakerAt: 0, pose: 'idle', subAt: 0 };
   const W = 1280, H = 720;
+  // Meet cover-crops the 16:9 canvas to the TILE's aspect, and a tile in a grid is nearly square.
+  // Measured on a 3-up grid 2026-08-19: the tile was ~510x605, so only the central ~607px of the
+  // canvas survived — anything outside it was drawn, published, and never seen by anybody. Treat
+  // this band as the only real estate that exists. SAFE_W is deliberately narrower than measured,
+  // because the tile gets squarer as participants are added.
+  const SAFE_W = 560, SAFE_X0 = (W - SAFE_W) / 2, SAFE_X1 = SAFE_X0 + SAFE_W;
+  const hashStr = (x: string) => {
+    let h = 0;
+    for (let i = 0; i < x.length; i++) h = (h * 31 + x.charCodeAt(i)) | 0;
+    return h;
+  };
   const wrap = (t: any, max: any) => {
     const words = String(t).split(/\s+/); const out = []; let cur = '';
     for (const w of words) {
@@ -423,6 +434,102 @@ export function installHud(): void {
 
   // The brainrot box. Entertainment that still cannot lie: the churn is driven by segment arrival
   // and RMS, the palette advances only when a segment lands, and a silent room calms it right down.
+  // The swarm. The brainrot band-and-scatter is honest but says nothing: it redraws the last nine
+  // words at pseudo-random positions every segment, so it reacts to whether anyone is talking and
+  // never to what is being said. This one ACCUMULATES — a word keeps its place, grows when it
+  // recurs, and fades when the room moves on — so the tile carries the shape of the conversation
+  // instead of its volume. Same rule as everything else here: no free-running timers. Every
+  // quantity below is a real signal (segment arrival, word frequency, speaker change, vocabulary
+  // turnover) and a dead pipeline produces a still, decaying field rather than a busy one.
+  const STOP = new Set(('the a an and or but so of to in on at for with is are was were be been am '
+    + 'i you he she it we they me him her them my your our their this that these those as if then '
+    + 'than there here what which who whom how why when where do does did done have has had will '
+    + 'would can could should shall may might must not no yes just like really very much some any '
+    + 'all its it\'s im i\'m dont don\'t thats that\'s well okay ok yeah yep uh um mm mhm right '
+    + 'know think going get got go one two lot thing things kind sort mean say said').split(' '));
+  const swarm: any = new Map();          // word -> {n, x, y, vx, vy, seen, hue}
+  let swarmSeg = -1, shiftPulse = 0, prevVocab: any = new Set();
+
+  BACKGROUNDS.swarm = (t: any, state: any, hot: any) => {
+    const amp = Math.min(S.amplitude * 2, 1);
+
+    // Ingest only when a segment actually lands. Doing this per frame would let the field grow
+    // while nobody speaks, which is the exact lie the HUD is built to avoid.
+    if (S.segments !== swarmSeg) {
+      swarmSeg = S.segments;
+      const hue = (Math.abs(hashStr(S.speaker || 'nobody')) % 360);
+      const fresh: any = new Set();
+      const toks = (S.lines.slice(-2).join(' ').toLowerCase().match(/[a-z']{3,}/g) || []);
+      for (const w of toks) {
+        if (STOP.has(w)) continue;
+        fresh.add(w);
+        const e = swarm.get(w);
+        if (e) { e.n++; e.seen = S.frames; e.hue = hue; }
+        else {
+          const a = (Math.abs(hashStr(w)) % 360) * Math.PI / 180;   // stable angle per word
+          // Spawn inside the visible band. The old ring used a 460px x-radius, which put most of
+          // the field in the cropped margin — the tile looked empty while the swarm was busy.
+          swarm.set(w, { n: 1, x: W / 2 + Math.cos(a) * (SAFE_W / 2 - 40),
+                         y: 300 + Math.sin(a) * 210,
+                         vx: -Math.cos(a) * 0.5, vy: -Math.sin(a) * 0.4, seen: S.frames, hue });
+        }
+      }
+      // Topic shift: how little of this segment's vocabulary was in the previous one. Low overlap
+      // after a real exchange is the cheapest honest "we moved on" signal available without a model.
+      if (prevVocab.size && fresh.size) {
+        let shared = 0;
+        fresh.forEach((w: any) => { if (prevVocab.has(w)) shared++; });
+        const overlap = shared / fresh.size;
+        if (overlap < 0.12) shiftPulse = 1;
+      }
+      prevVocab = fresh;
+      if (swarm.size > 80) {                                  // bound the field, oldest go first
+        const old = [...swarm.entries()].sort((a: any, b: any) => a[1].seen - b[1].seen);
+        for (let i = 0; i < old.length - 80; i++) swarm.delete(old[i][0]);
+      }
+    }
+
+    // A shift pushes everything outward once — the room letting go of what it was holding.
+    const shift = shiftPulse;
+    shiftPulse *= 0.94;
+
+    ctx.fillStyle = 'rgba(8,7,12,0.30)';                      // motion trails, cheap on CPU
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.textAlign = 'center';
+    swarm.forEach((e: any, w: any) => {
+      const age = (S.frames - e.seen) / 900;                  // ~30s to fade at 30fps
+      if (age > 1) { swarm.delete(w); return; }
+
+      // Drift inward, then orbit. Speed follows amplitude, so a quiet room is a slow one.
+      const dx = e.x - W / 2, dy = e.y - H / 2;
+      const d = Math.max(60, Math.hypot(dx, dy));
+      const pull = d > 190 ? 0.012 : -0.007;                  // ring, never a pile in the middle
+      e.vx += (-dx / d) * pull + (-dy / d) * 0.012 * (0.3 + amp);
+      e.vy += (-dy / d) * pull + (dx / d) * 0.012 * (0.3 + amp);
+      e.vx += (dx / d) * shift * 1.6; e.vy += (dy / d) * shift * 1.6;
+      const damp = hot ? 0.965 : 0.90;                        // silence settles the field
+      e.vx *= damp; e.vy *= damp;
+      e.x += e.vx; e.y += e.vy;
+      if (e.x < SAFE_X0 + 24) { e.x = SAFE_X0 + 24; e.vx = Math.abs(e.vx); }
+      if (e.x > SAFE_X1 - 24) { e.x = SAFE_X1 - 24; e.vx = -Math.abs(e.vx); }
+      if (e.y < 60)  { e.y = 60;  e.vy = Math.abs(e.vy); }
+      if (e.y > 560) { e.y = 560; e.vy = -Math.abs(e.vy); }
+
+      const sz = 15 + Math.min(e.n, 9) * 6 + amp * 8;         // REPETITION is the size, not chance
+      const a = (1 - age) * (0.30 + Math.min(e.n, 6) * 0.10);
+      ctx.fillStyle = 'hsla(' + e.hue + ',88%,' + (58 + Math.min(e.n, 6) * 4) + '%,' + a + ')';
+      ctx.font = (e.n > 2 ? 'bold ' : '') + sz + 'px system-ui, sans-serif';
+      ctx.fillText(w, e.x, e.y);
+    });
+
+    if (shift > 0.05) {                                       // the shift, made visible
+      ctx.strokeStyle = 'rgba(255,255,255,' + (shift * 0.5) + ')';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(W / 2, H / 2, 320 * (1.4 - shift), 0, Math.PI * 2); ctx.stroke();
+    }
+  };
+
   BACKGROUNDS.brainrot = (t: any, state: any, hot: any) => {
     const amp = Math.min(S.amplitude * 2, 1);
     const energy = (hot ? 0.55 : 0.06) + amp * 0.45;      // gated by REAL activity
@@ -502,6 +609,40 @@ export function installHud(): void {
     ctx.fillStyle = '#5a5a70'; ctx.font = '24px system-ui, sans-serif';
     ctx.textAlign = 'right';
     ctx.fillText(state + ' · ' + S.segments + ' segs · ' + Math.round((Date.now() - S.started) / 1000) + 's', W - 44, 700);
+
+    // GOOD POINT banner. Driven by S.sub, which camera_show already carries — so a judge running
+    // anywhere can raise one with a plain act, no contract change and no respawn. The optional
+    // "8|" score prefix picks the treatment, mirroring the original box: >=9 triumphant, >=8
+    // bright, else warm. It animates on ARRIVAL (S.subAt is stamped when the text CHANGES) and
+    // then holds still, so a stuck banner looks stuck instead of looking live.
+    if (S.sub) {
+      const age = (S.frames - S.subAt) / 30;                  // seconds since it landed
+      if (age < 14) {
+        const m = /^(\d{1,2})\|([\s\S]*)$/.exec(S.sub);
+        const score = m ? parseInt(m[1], 10) : 7;
+        const quote = m ? m[2] : S.sub;
+        const hue = score >= 9 ? 45 : score >= 8 ? 175 : 25;   // triumphant / bright / warm
+        const rise = Math.min(1, age * 3.2);                   // slides in over ~0.3s
+        const fade = age > 11 ? Math.max(0, (14 - age) / 3) : 1;
+        const a = rise * fade;
+        const lines = wrap(quote, 26).slice(0, 3);        // narrow band -> fewer chars, more lines
+        const bh = 50 + lines.length * 34;
+        const by = 74 - (1 - rise) * 40;
+
+        ctx.fillStyle = 'hsla(' + hue + ',70%,10%,' + (0.92 * a) + ')';
+        ctx.fillRect(SAFE_X0, by, SAFE_W, bh);
+        ctx.fillStyle = 'hsla(' + hue + ',95%,60%,' + a + ')';
+        ctx.fillRect(SAFE_X0, by, 6, bh);
+
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 19px system-ui, sans-serif';
+        ctx.fillStyle = 'hsla(' + hue + ',95%,66%,' + a + ')';
+        ctx.fillText('GOOD POINT' + (m ? '  ' + score + '/10' : ''), W / 2, by + 30);
+        ctx.font = 'bold 27px system-ui, sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,' + a + ')';
+        lines.forEach((l: any, i: any) => ctx.fillText(l, W / 2, by + 66 + i * 34));
+      }
+    }
     g.requestAnimationFrame(draw);
   };
   draw();
@@ -520,8 +661,9 @@ export function installHud(): void {
   const stream = fresh();               // the canonical one, for __vexaCam.stream consumers
   g.__vexaCam = {
     stream,
-    set(title: any, sub: any) { S.title = title || S.title; S.sub = sub || ''; },
-    version: 'hud-v6-skins',
+    set(title: any, sub: any) { S.title = title || S.title;
+                               const n = sub || ''; if (n !== S.sub) S.subAt = S.frames; S.sub = n; },
+    version: 'hud-v9-safearea',
     avatars: () => Object.keys(AVATARS),
     backgrounds: () => Object.keys(BACKGROUNDS),
     hud(patch: any) {
@@ -554,7 +696,7 @@ export function installHud(): void {
       if (patch.windingUp !== undefined) { S.windingUp = !!patch.windingUp; if (patch.windingUp) S.windUpStart = S.frames; }
       if (patch.amplitude !== undefined) { S.amplitude = patch.amplitude; }
       if (patch.title) S.title = patch.title;
-      if (patch.sub !== undefined) S.sub = patch.sub;
+      if (patch.sub !== undefined) { if (patch.sub !== S.sub) S.subAt = S.frames; S.sub = patch.sub; }
     },
     frames: () => S.frames,
     // Report the DERIVED state too, not just the inputs. Without pose/amplitude here a test can
@@ -635,7 +777,7 @@ export function createCameraController(page: Page): CameraController {
       // HUD edits become hot too (no rejoin), matching the Node-side surfaces.
       const stale = await page.evaluate(() => {
         const g: any = globalThis as any;
-        if (g.__vexaCam && g.__vexaCam.version === 'hud-v6-skins') return false;
+        if (g.__vexaCam && g.__vexaCam.version === 'hud-v9-safearea') return false;
         try { delete g.__vexaCam; } catch { g.__vexaCam = undefined; }
         return true;
       }).catch(() => false);
