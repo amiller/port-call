@@ -71,6 +71,10 @@ staging vs prod is a *deploy target* rather than a branch (`deploy-staging-core.
 is automatic — an agent runs `./promote.sh <branch>` itself and the merge happens if the gate is
 green. Nobody shepherds branches into a shared stream by hand.
 
+`main` means *what is on prod*: nothing but `deploy-prod.sh` moves it, so reading `main` answers the
+question the rig cannot — which commit Andrew's meetings are actually running. `staging` is always
+at or ahead of it.
+
 `deploy-prod.sh` refuses any ref that is not staging or an ancestor of it, so code that skipped the
 gate cannot reach the rig Andrew is in a meeting on. It archives before it touches anything and
 deploys by hot-swap, never by recreating the container — `docker compose up -d` recreates if the
