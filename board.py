@@ -23,7 +23,7 @@ EMOJI = ["👍", "🎉", "💖", "👏", "😂", "😮"]
 # The camera is a character over a background, chosen independently. These must match the registries
 # in patches/bot-camera.ts; an unknown name is REJECTED by the bot with the valid set named, so a
 # drift here shows up as a loud error in the log rather than as a silently unchanged tile.
-AVATARS = ["rooster", "tina", "dmarz"]
+AVATARS = ["rooster", "hancock", "tina", "dmarz"]   # the bot exposes avatars() live; this list is a drift risk (see #37)
 BACKGROUNDS = ["transcript", "vitals", "brainrot"]
 # One-tap looks for driving a live meeting: (label, avatar, background).
 PRESETS = [("heartbeat", "rooster", "transcript"),
@@ -296,7 +296,7 @@ class H(BaseHTTPRequestHandler):
                 pass
             try:
                 r = gw("/bots", BOT_TOKEN, "POST", {"platform": "google_meet", "native_meeting_id": code,
-                                                    "bot_name": "Vexa", "voice_agent_enabled": True})
+                                                    "bot_name": "Port Call", "voice_agent_enabled": True})
                 return self._send(f"joining {code} as bot {r.get('id')}", "text/plain")
             except Exception as e:
                 return self._send(f"join failed: {e}", "text/plain")

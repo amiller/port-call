@@ -34,7 +34,7 @@ case "${1:-}" in
   join)
     curl -s -X DELETE "$GW/bots/google_meet/$ROOM" -H "X-API-Key: $BOT" -o /dev/null || true; sleep 6
     ID=$(curl -s -X POST $GW/bots -H "X-API-Key: $BOT" -H "Content-Type: application/json" \
-      -d "{\"platform\":\"google_meet\",\"native_meeting_id\":\"$ROOM\",\"bot_name\":\"${BOT_NAME:-Vexa}\",\"voice_agent_enabled\":true}" \
+      -d "{\"platform\":\"google_meet\",\"native_meeting_id\":\"$ROOM\",\"bot_name\":\"${BOT_NAME:-Port Call}\",\"voice_agent_enabled\":true}" \
       | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))")
     [ -n "$ID" ] || { echo "spawn rejected"; exit 1; }
     echo "$ID" > $STATE

@@ -42,7 +42,7 @@ log()  { docker exec "$C" sh -c "grep -h '$1' /tmp/vexa-workloads/mtg-$ID-*.log 
 curl -s -X DELETE "$GW/bots/google_meet/$CODE" -H "X-API-Key: $BOT" -o /dev/null || true
 sleep 8
 ID=$(curl -s -X POST $GW/bots -H "X-API-Key: $BOT" -H "Content-Type: application/json" \
-  -d "{\"platform\":\"google_meet\",\"native_meeting_id\":\"$CODE\",\"bot_name\":\"Vexa E2E\",\"voice_agent_enabled\":true}" \
+  -d "{\"platform\":\"google_meet\",\"native_meeting_id\":\"$CODE\",\"bot_name\":\"Port Call E2E\",\"voice_agent_enabled\":true}" \
   | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))")
 [ -n "$ID" ] || { echo "FAIL spawn rejected"; exit 1; }
 echo "bot=$ID meeting=$CODE"
