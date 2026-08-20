@@ -56,7 +56,9 @@ transcript names one.
 
 Output exactly this shape and nothing else — no preamble, no code fence:
 
-NAME: <a short name for this meeting, 2-5 words, the way a person would refer to it>
+NAME: <a short name for this meeting, 2-5 words, the way a person would refer to it. Name the \
+TOPIC, never the tooling: no bot names (ASR mangles them, and a title is the one place a \
+mishear cannot be marked [?]), no proper noun you are not certain of>
 
 ## Digest
 
