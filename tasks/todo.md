@@ -309,17 +309,22 @@ Three things are called "vexa" here and only the first is the project. Ordered b
 - [x] New registry images: `ghcr.io/amiller/port-call-lite`, `-shims`
 - Cost: none. Nothing resolves these strings.
 
-### Phase 2 — the name in the room  (issue #25, ~30 min)
-- [ ] `board.py:299` `"bot_name": "Vexa"`, `demo.sh:37` `${BOT_NAME:-Vexa}`,
-      `e2e.sh:45` `"Vexa E2E"`, `journeys.sh:54` `"Vexa Journeys"`
-- [ ] **Add the new display name to `roster.json` as `{"bot": true}` BEFORE the first meeting.**
+### Phase 2 — the name in the room  (issue #25)  [DONE 2026-08-22]
+- [x] `board.py:299` `"Port Call"`, `demo.sh:37` `${BOT_NAME:-Port Call}`,
+      `e2e.sh:45` `"Port Call E2E"`, `journeys.sh:54` `"Port Call Journeys"`
+- [x] **The new display names ARE in `roster.json` as `{"bot": true}`** — verified on fractal:
+      `Port Call`, `Port Call E2E`, `Port Call Journeys`, alongside the legacy `Vexa` and
+      `Account Link` entries, which stay so old transcripts keep resolving.
       The roster keys on the Meet display name; renaming the bot without this makes the next
       `postdoc.py` run roster-block on an unknown speaker. This is the one trap in Phase 2.
 - Cost: near zero, no infra touched. Highest visible value — it is the name participants read.
 
-### Phase 3 — the GitHub repo  (~15 min, one-way-ish)
-- [ ] Rename `amiller/vexa-poc` → `port-call`; `git remote set-url origin`
+### Phase 3 — the GitHub repo  (~15 min, one-way-ish)  [DONE 2026-08-22]
+- [x] Rename `amiller/vexa-poc` → `port-call`; `git remote set-url origin`
 - [ ] Optionally rename the local checkout `~/projects/vexa-poc`
+- GitHub Pages follows the rename: `amiller.github.io/vexa-poc` → `amiller.github.io/port-call`,
+  still built from `main` + `/docs`. Pages only redeploys when `main` moves, so the site keeps
+  serving the last promoted commit until then.
 - GitHub permanently redirects the old URLs, so the 10 issue links in `docs/` keep working and
   are worth leaving alone rather than rewriting.
 - **Do it before the first push.** `origin/main` is currently behind by a full day's work, so
