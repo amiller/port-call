@@ -16,7 +16,7 @@ the test suite**, because in an empty lab room each selector has exactly one can
 So the rule is: an agent is only assigned work whose success condition it can observe by itself.
 Everything else waits for a human in a call.
 
-## The three rungs
+## The four rungs
 
 Work is placed on the rung where its evidence lives.
 
@@ -25,6 +25,7 @@ Work is placed on the rung where its evidence lives.
 | Bench | `./bench.sh` | nothing — no meeting, no bot, no human | canvas, capture, selector resolution against saved DOM |
 | E2E | `./e2e.sh` | a standing open lab room | join, transcribe, speak, chat, react, share — 10 checks, ~90s |
 | Journeys | `./journeys.sh` | a real room, sometimes a human | consent gates, populated-room audio, the paths e2e structurally cannot see |
+| Duel | `./duel.sh` | two rigs and the lab room | the closed audio loop, and what it costs — the only rung that can hear |
 
 The bench rung is the one that makes agent work possible, and two pieces of it were built
 specifically to move evidence *down* a rung:
@@ -35,6 +36,12 @@ specifically to move evidence *down* a rung:
 - **`probe/camera-bench.mjs`** proves the whole camera surface on `about:blank`. The camera is the
   only surface that needs no meeting, no other participants, and no clicking, which is exactly why
   the camera roadmap is the most agent-suitable work in the repo.
+- **`duel.sh` puts two bots in one room**, which is the trick that moves the last human-only rung
+  down. Meet never loops a participant's own mic back, so one bot in an empty room cannot hear
+  itself — `journeys.sh` J4 SKIPs there, and every claim about audio actually reaching a meeting
+  used to need five people in a call. Two bots are two participants: each one's TTS is the other's
+  microphone, so the whole loop closes with nobody in the room. It counts back and forth and
+  reports the latency of each leg, so it is an instrument first and a pass/fail rung second.
 
 The queue in [`tasks/todo.md`](../tasks/todo.md) is ordered by this principle rather than by value.
 
@@ -108,6 +115,37 @@ canonical copies were in `shims/`, and the `live/` bind-mounts start empty on a 
 That is the same test as "could someone else run this", which is why those two papercuts became
 blocking issues rather than notes. An agent doing a cold bring-up is a fresh user who complains in
 structured form.
+
+## What a reboot does to all of this
+
+Found by rebooting fractal in the middle of a `duel.sh` run on 2026-08-20. A rig does not come back
+from a reboot; **rig 1 does**, because of one crontab line:
+
+    @reboot sleep 45 && cd /home/amiller/vexa-rig && ./relaunch.sh >> /tmp/vexa-relaunch.log 2>&1
+
+Rigs 2, 3 and 4 have no equivalent, and three separate things break, none of which announces itself:
+
+- **Tokens are gone.** They live in `/tmp` and only `relaunch.sh` mints them, so `gate.sh` dies at
+  `rig_require_tokens` until a human re-mints. The staging rig is simply unavailable and nothing
+  says so.
+- **Meeting rows stick in `stopping`.** A bot killed with the machine never transitions, and the
+  gateway then refuses every new spawn in that room with *"an active meeting already exists"*.
+  `DELETE` does not clear it — the row has to be closed in postgres by hand. This is the "stale
+  meeting row" `e2e.sh` guesses at in its failure message.
+- **A shim can come back attached to its network with no IP.** The bot then joins the meeting, goes
+  `active`, speaks — and cannot transcribe a word, because `TranscriptionError: stt unavailable`
+  only appears in the bot log. Nothing upstream is red. This is #19's silent-failure class with a
+  new instance, and it is the strongest argument for the duel rung: it is the only check that would
+  have caught it, because the transcript is the only thing that goes quiet.
+
+**A trap in the gate hook itself.** The hook rsyncs with `--delete`, and a rig whose containers were
+created from an *older* compose may bind-mount a path this tree no longer has (the root-level
+`near-shim.py` / `tts-shim.py`, whose canonical copies moved to `shims/` — the same layout papercut
+the zed bring-up reported). `--delete` removes the source, Docker silently **recreates it as a
+directory** on the next restart, and the container then cannot start at all: *"Are you trying to
+mount a directory onto a file?"*. Recovery is `rmdir` the bogus directory and
+`docker compose up -d <service>` so the container is recreated against the current compose. Worth
+knowing before it happens during a promotion rather than during a test.
 
 ## What it is not
 

@@ -76,6 +76,12 @@ for s in segs[-int('${2:-15}'):]:
   status)  need; curl -s $GW/bots/status -H "X-API-Key: $BOT" | python3 -c "
 import sys,json; r=[x for x in json.load(sys.stdin)['running'] if str(x['id'])=='$(cat $STATE)']
 print(r[0]['status'] if r else 'gone')" ;;
-  stop)    need; curl -s -X DELETE "$GW/bots/google_meet/$ROOM" -H "X-API-Key: $BOT" -o /dev/null; rm -f $STATE; echo stopped ;;
+  stop)    need
+    # Read the response instead of discarding it: on 2026-08-20 the DELETE failed, this printed
+    # "stopped" anyway, and the bot sat in a live office-hours call until someone checked chrome
+    # process counts. Reporting success for something that did not happen is the #19 failure class.
+    R=$(curl -s -X DELETE "$GW/bots/google_meet/$ROOM" -H "X-API-Key: $BOT")
+    echo "$R" | grep -q '"status"' || { echo "stop FAILED — gateway said: ${R:-nothing}" >&2; exit 1; }
+    rm -f $STATE; echo "stopping: $R" ;;
   *) sed -n '2,25p' "$0" ;;
 esac

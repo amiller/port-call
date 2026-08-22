@@ -31,6 +31,7 @@ import { createRedisActsSource, redisActsClientFrom } from './adapters/acts-redi
 import { createBrowserJoinDriver } from './join-driver.js';
 import { createBotPipeline, type BotPipeline } from './pipeline.js';
 import { createBotRecordingSink } from './recording.js';
+import { createCaptureTap } from './capture-tap.js';
 import { launchBrowser, startCaptureBridge, startRecording, createSpeakController, type BrowserSession, type SpeakController } from './capture-bridge.js';
 import { type ScreenShareController } from './screen-share.js';
 import { type SelfCheck } from './selfcheck.js';
@@ -258,10 +259,14 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
     // window.VexaBrowserUtils and the participant <audio> elements exist. Starting it at launch ran
     // the page.evaluate on the BLANK pre-navigation page (no VexaBrowserUtils, no audio), and the
     // subsequent goto to the meeting URL destroyed that context — so capture never attached. (L4.)
+    // Raw-audio tap (OFF unless VEXA_CAPTURE_TAP names a directory). This is the sink the bridge's
+    // telemetry tee has always expected and never had; with it unset, createCaptureTap returns
+    // undefined and startCaptureBridge is called exactly as before.
+    const tap = createCaptureTap(inv.meeting_id ?? inv.nativeMeetingId ?? 'x', (m) => console.log(`[bot] ${m}`));
     const sess = session, bp = botPipeline, rec = recording;
     pipeline = {
       async start() {
-        stopCapture = await startCaptureBridge(sess.page, inv, bp);   // on the live meeting page
+        stopCapture = await startCaptureBridge(sess.page, inv, bp, tap);   // on the live meeting page
         if (rec) stopRecording = await startRecording(sess.page, inv, rec);   // MediaRecorder → recording.v1
         await bp.start();
       },
@@ -270,6 +275,7 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
         await sc().catch(() => { /* best-effort */ });
         const sr = stopRecording; stopRecording = async () => {};
         await sr().catch(() => { /* best-effort */ });   // flush the final chunk → master assembly
+        tap?.close();                                    // flush the jsonl before the process goes
         await bp.stop();
       },
     };

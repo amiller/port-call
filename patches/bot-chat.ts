@@ -16,6 +16,7 @@
  */
 import type { Page } from '@vexa/remote-browser';
 import { createRepetitionGuard } from './repetition-guard.js';
+import { dismissModals, sweep } from './modals.js';
 
 // MODULE scope, not per-controller: index.ts builds a NEW ChatController for EVERY chat_send act
 // (surface() re-imports this module, cache-busted only by mtime). A guard owned by the controller
@@ -86,9 +87,15 @@ export function createChatController(page: Page): ChatController {
       }
 
       await page.bringToFront();
+      await sweep(page, 'chat', (m) => console.log(m));
       await openPanel();
       const box = page.locator(INPUT).first();
-      await box.click({ timeout: 5_000 });
+      // A throw here used to vanish — the act handler swallowed it, so a blocked composer looked
+      // exactly like a delivered message. Name it, then rethrow: never a silent failure.
+      await box.click({ timeout: 5_000 }).catch((e: any) => {
+        console.log('[chat] BLOCKED — composer not clickable: ' + String(e).slice(0, 120));
+        throw e;
+      });
       await box.fill(text);
       // Enter first (Meet's normal path); fall back to the explicit send button if the box did
       // not clear, which is the observable signal that the message was actually submitted.
@@ -101,6 +108,7 @@ export function createChatController(page: Page): ChatController {
 
     async read(): Promise<void> {
       await page.bringToFront();
+      await dismissModals(page);
       await openPanel();
       console.log('[chat] ' + JSON.stringify({ messages: await messages() }));
     },

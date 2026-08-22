@@ -25,6 +25,7 @@ import argparse, json, shlex, subprocess, sys, time
 
 HOST = "fractal"
 PG = "docker exec vexa-rig-postgres-1 psql -U postgres vexa -tAc"
+GW = "http://localhost:8056"
 SHIM = "vexa-rig-near-shim-1"
 BOT = "vexa-rig-vexa-lite-1"
 MODEL = "deepseek-ai/DeepSeek-V4-Flash"
@@ -43,11 +44,31 @@ def ssh(cmd, **kw):
                           check=True, **kw).stdout
 
 
-def segments(mid, limit):
-    q = (f"select coalesce(speaker,'?')||': '||text from transcriptions "
-         f"where meeting_id={mid} order by id desc limit {limit}")
-    rows = ssh(f"{PG} {shlex.quote(q)}").strip().splitlines()
-    return list(reversed([r.strip() for r in rows if r.strip()]))
+def room_of(mid):
+    """meeting id -> room code. The gateway is keyed by ROOM and serves that room's LATEST meeting,
+    so pointing this at an old meeting id reads whatever ran in that room most recently. Harmless
+    for the only real use — a sidecar attached to the call happening now — and wrong for replay."""
+    q = f"select platform_specific_id from meetings where id={mid}"
+    code = ssh(f"{PG} {shlex.quote(q)}").strip()
+    if not code:
+        sys.exit(f"no meeting row {mid}")
+    return code
+
+
+def segments(code, limit):
+    """The LIVE transcript, read from the gateway — NOT from postgres.
+
+    `transcriptions` is a durability layer, not a live view: db_writer.py holds a segment for
+    IMMUTABILITY_THRESHOLD (30s) after its last update and flushes on a 10s tick, so reading that
+    table put every verdict ~40s behind the room (measured 2026-08-20: p50 39.9s, p90 50.6s over
+    six real meetings). The gateway merges the in-flight redis hash and is the only fresh source.
+    Still `completed` only — drafts rewrite themselves as the window grows, and a banner is a
+    claim about something someone actually finished saying."""
+    out = ssh(f"curl -s {GW}/transcripts/google_meet/{code} "
+              f'-H "X-API-Key: $(cat /tmp/vexa-tx-token.txt)"')
+    segs = json.loads(out).get("segments") or []
+    return [f"{s.get('speaker') or '?'}: {(s.get('text') or '').strip()}"
+            for s in segs if s.get("completed") and (s.get("text") or "").strip()][-limit:]
 
 
 def judge(text):
@@ -94,9 +115,10 @@ def main():
     p.add_argument("--bg", default="swarm")
     a = p.parse_args()
 
+    code = room_of(a.meeting_id)
     seen = set()
     while True:
-        segs = segments(a.meeting_id, a.window)
+        segs = segments(code, a.window)
         if segs:
             key = segs[-1]
             if key not in seen:          # only judge when the room has actually moved on

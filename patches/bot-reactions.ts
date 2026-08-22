@@ -10,6 +10,7 @@
  * isVisible:false and clicks time out.
  */
 import type { Page } from '@vexa/remote-browser';
+import { sweep } from './modals.js';
 
 const REACT_BTN = 'button[aria-label*="Send a reaction" i], button[aria-label*="reaction" i]';
 
@@ -19,6 +20,7 @@ export function createReactionController(page: Page): ReactionController {
   return {
     async send(emoji: string): Promise<void> {
       await page.bringToFront();
+      await sweep(page, 'reaction', (m) => console.log(m));
       await page.mouse.move(640, 360).catch(() => {});
       await page.mouse.move(900, 700).catch(() => {});
       await page.waitForTimeout(400);

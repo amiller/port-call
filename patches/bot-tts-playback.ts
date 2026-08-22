@@ -24,6 +24,32 @@ const PAPLAY_ARGS = ['--raw', '--format=s16le', `--rate=${RATE_HZ}`, '--channels
 /** Amplitude envelope resolution — one RMS value per 100ms of AUDIO, emitted at 10Hz wall clock. */
 const FRAME_MS = 100;
 
+/**
+ * Assert the PulseAudio graph exists, rebuilding it if it does not.  (#49)
+ *
+ * `tts_sink` -> `tts_sink.monitor` -> `virtual_mic` is created ONCE, by the image's
+ * setup-pulseaudio-sinks.sh, when the container starts. Nothing recreated it if it went away — and
+ * on 2026-08-21 it did: PulseAudio was up with only the fallback `auto_null`, so every speak act
+ * hit "Stream error: No such entity", paplay exited instantly, and the resulting EPIPE took the
+ * whole bot out of a live call (#48). Restoring the graph by hand fixed it.
+ *
+ * The setup script is idempotent, so the repair is just running it. LOUD on both branches: a graph
+ * that had to be rebuilt is a fault worth seeing, not a detail to paper over — if this line starts
+ * appearing every join, something is tearing the sinks down and that is the real bug.
+ *
+ * NOTE the caller must still respawn a bot whose Chromium already bound its microphone before the
+ * repair: getUserMedia holds the source it was given at join, so a rebuilt virtual_mic reaches the
+ * meeting only for bots that join afterwards.
+ */
+function ensureAudioGraph(log: (m: string) => void): void {
+  const sinks = execSync('pactl list sinks short', { stdio: 'pipe' }).toString();
+  if (sinks.includes('tts_sink')) return;
+  log('[tts] AUDIO GRAPH MISSING — tts_sink is gone, rebuilding before playback');
+  execSync('/usr/local/bin/setup-pulseaudio-sinks.sh', { stdio: 'pipe' });
+  const after = execSync('pactl list sinks short', { stdio: 'pipe' }).toString();
+  log(`[tts] graph rebuilt: ${after.includes('tts_sink') ? 'tts_sink present' : 'STILL MISSING'}`);
+}
+
 function setTtsMute(muted: boolean, log: (m: string) => void): void {
   const v = muted ? '1' : '0';
   try {
@@ -72,6 +98,10 @@ export function createTtsPlayback(log: (m: string) => void = () => { /* */ }): T
   };
 
   const speak = async (text: string, voice = 'auto'): Promise<void> => {
+    // Say-to-audible instrumentation (#3). Epoch ms on BOTH lines so a reader differences them
+    // without parsing the mixed-format bot log: bare [bot] lines carry no ts of their own.
+    const beganAt = Date.now();
+    log(`[tts] begin ts=${beganAt} chars=${text.length}`);
     const base = process.env.TTS_SERVICE_URL?.trim();
     if (!base) { log('[tts] TTS_SERVICE_URL not set — speak is a no-op'); return; }
     const postData = JSON.stringify({ model: 'tts-1', input: text, voice, response_format: 'pcm' });
@@ -98,6 +128,7 @@ export function createTtsPlayback(log: (m: string) => void = () => { /* */ }): T
           res.on('end', () => { log(`[tts] service ${res.statusCode}: ${body.slice(0, 120)}`); resolve(); });
           return;
         }
+        ensureAudioGraph(log);                        // #49: the sink can vanish mid-run
         setTtsMute(false, log);                       // open the mic only during playback
         const p = spawn('paplay', PAPLAY_ARGS, { stdio: ['pipe', 'pipe', 'pipe'] });
         proc = p;
@@ -135,6 +166,10 @@ export function createTtsPlayback(log: (m: string) => void = () => { /* */ }): T
         res.on('end', () => { if (frameSamples) envelope.push(Math.sqrt(sumSquares / frameSamples)); });
 
         const startedAt = Date.now();
+        // The shim answers with a Content-Length body (see above), so the response only begins
+        // once synthesis is DONE — startedAt is therefore the first sample paplay consumes, and
+        // synth_ms is the dead air between the act and any sound at all.
+        log(`[tts] audible ts=${startedAt} synth_ms=${startedAt - beganAt}`);
         const ticker = setInterval(() => {
           if (!ampCallback) return;
           const frame = Math.floor((Date.now() - startedAt) / FRAME_MS);
@@ -142,6 +177,19 @@ export function createTtsPlayback(log: (m: string) => void = () => { /* */ }): T
         }, FRAME_MS);
         ticker.unref?.();
         tickers.add(ticker);
+
+        // paplay can exit early — a dead PulseAudio, a lost tts_sink, a failed unmute. The pipe
+        // then writes into closed stdin, which emits 'error' on a stream nobody listened to, and
+        // an unhandled 'error' event takes the WHOLE PROCESS down. That killed bot 154 out of a
+        // live call on 2026-08-21, seconds after `pactl set-sink-mute tts_sink 0` failed: one
+        // muffed utterance evicted the bot and ended the recording. A TTS fault must never be able
+        // to do that. Name it, drop the utterance, stay in the meeting.
+        p.stdin?.on('error', (e: any) => {
+          log(`[tts] playback pipe died (${e?.code || String(e)}) — utterance dropped, bot stays in the call`);
+          try { res.destroy(); } catch { /* the response is already gone */ }
+          done();
+        });
+        res.on('error', (e: any) => { log(`[tts] response stream error: ${String(e)}`); done(); });
 
         res.pipe(p.stdin!);                           // stream PCM straight to the mic sink
       });
