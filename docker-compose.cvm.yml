@@ -1,6 +1,17 @@
 # The same rig, shaped for a dstack / Phala CVM.
 #
-#   phala deploy -n vexa -c docker-compose.cvm.yml -e cvm.env --vcpu 4 --memory 8192 --disk-size 60
+#   phala deploy -n port-call -c docker-compose.cvm.yml \
+#     -e NEAR_API_KEY=... -e ADMIN_TOKEN=... --vcpu 4 --memory 8192 --disk-size 60
+#
+# IMAGES ARE PINNED LITERALLY, and the two secrets use PLAIN ${VAR}, never `${VAR:?...}`. Both are
+# forced by dstack: its "Processing encrypted env" step does NOT make values visible to docker
+# compose INTERPOLATION inside the CVM, so any `:?` required-variable form aborts the boot with
+# "required variable X is missing a value" — the CVM reaches `running` with zero containers, which
+# looks like a healthy deploy from the outside. Verified 2026-08-22 across three deploys: with an
+# env FILE (-e cvm.env), with explicit -e KEY=VALUE, and finally without interpolation, which is
+# the only one that booted. `image:` cannot be a pass-through at all, so pinning is the only
+# option — and it is the better one here, since the compose hash then covers the exact image.
+# Bump the two tags on release.
 #
 # Why a second file rather than the main one: a CVM is handed ONE compose file and nothing else.
 # No build context, no repo, no host filesystem. Phala's own pre-deploy rules reject `build:`,
@@ -39,22 +50,22 @@ services:
       retries: 20
 
   near-shim:
-    image: ${SHIMS_IMAGE:?set SHIMS_IMAGE to a pushed registry tag}
+    image: ghcr.io/amiller/port-call-shims:8172960
     command: uvicorn near-shim:app --host 0.0.0.0 --port 8001
     environment:
-      NEAR_API_KEY: ${NEAR_API_KEY:?set NEAR_API_KEY}
+      NEAR_API_KEY: ${NEAR_API_KEY}
       SHIM_LOG: metrics
     restart: unless-stopped
 
   tts-shim:
-    image: ${SHIMS_IMAGE:?set SHIMS_IMAGE to a pushed registry tag}
+    image: ghcr.io/amiller/port-call-shims:8172960
     command: uvicorn tts-shim:app --host 0.0.0.0 --port 8002
     environment:
-      TTS_ENGINE: ${TTS_ENGINE:-piper}
+      TTS_ENGINE: piper
     restart: unless-stopped
 
   vexa-lite:
-    image: ${VEXA_IMAGE:?set VEXA_IMAGE to a pushed registry tag}
+    image: ghcr.io/amiller/port-call-lite:8172960
     shm_size: 2gb
     depends_on:
       postgres: {condition: service_healthy}
@@ -70,7 +81,7 @@ services:
       DB_USER: postgres
       DB_PASSWORD: postgres
       DB_SSL_MODE: disable
-      ADMIN_API_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN}
+      ADMIN_API_TOKEN: ${ADMIN_TOKEN}
       TRANSCRIPTION_SERVICE_URL: http://near-shim:8001/v1/audio/transcriptions
       TRANSCRIPTION_SERVICE_TOKEN: near
       VEXA_AUDIO_METER: "1"
