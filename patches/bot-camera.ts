@@ -48,6 +48,26 @@ export function installHud(): void {
     for (let i = 0; i < x.length; i++) h = (h * 31 + x.charCodeAt(i)) | 0;
     return h;
   };
+  // Wrap/clip by MEASURED width against the visible band, not by character count. A character
+  // budget tuned for the full 1280 canvas draws past the crop and is never seen: the 56px caption
+  // wrapped at 30 chars (~930px) into a 560px band. Fixed 2026-08-21, after SAFE_W had already
+  // been honoured by the swarm background and the GOOD POINT banner but never back-ported here.
+  const wrapFit = (t: any, font: any, pad: any = 24) => {
+    ctx.font = font;
+    const words = String(t).split(/\s+/); const out: any = []; let cur = '';
+    for (const w of words) {
+      const nx = cur ? cur + ' ' + w : w;
+      if (ctx.measureText(nx).width > SAFE_W - pad) { if (cur) out.push(cur); cur = w; } else cur = nx;
+    }
+    if (cur) out.push(cur);
+    return out;
+  };
+  const clipFit = (t: any, font: any, pad: any = 24) => {
+    ctx.font = font;
+    let x = String(t);
+    while (x.length > 1 && ctx.measureText(x).width > SAFE_W - pad) x = x.slice(0, -1);
+    return x;
+  };
   const wrap = (t: any, max: any) => {
     const words = String(t).split(/\s+/); const out = []; let cur = '';
     for (const w of words) {
@@ -376,13 +396,13 @@ export function installHud(): void {
   BACKGROUNDS.transcript = (t: any, state: any, hot: any) => {
     ctx.textAlign = 'center';
     ctx.fillStyle = hot ? 'rgba(124,226,139,0.9)' : 'rgba(90,90,112,0.9)';
-    ctx.font = 'bold 36px system-ui, sans-serif';
-    ctx.fillText((S.speaker || 'listening…').slice(0, 26).toUpperCase(), W / 2, 52);
+    ctx.fillText(clipFit((S.speaker || 'listening…').toUpperCase(),
+                         'bold 36px system-ui, sans-serif'), W / 2, 52);
 
     // Caption ABOVE the character: in a Meet grid the viewer's own picture-in-picture sits over
     // the bottom-right of every remote tile, so anything written low is the first thing occluded.
     const last = S.lines.length ? S.lines[S.lines.length - 1] : '';
-    const rows = wrap(last || 'say something…', 30).slice(-2);
+    const rows = wrapFit(last || 'say something…', 'bold 56px system-ui, sans-serif').slice(-2);
     ctx.fillStyle = 'rgba(7,7,12,0.72)';
     ctx.fillRect(0, 76, W, rows.length * 62 + 22);
     ctx.fillStyle = '#ffffff';
@@ -391,7 +411,8 @@ export function installHud(): void {
 
     ctx.fillStyle = 'rgba(76,76,102,0.95)'; ctx.font = '26px system-ui, sans-serif';
     S.lines.slice(-3, -1).reverse().forEach((l: any, i: any) =>
-      ctx.fillText(l.slice(0, 54), W / 2, 96 + rows.length * 62 + 34 + i * 30));
+      ctx.fillText(clipFit(l, '26px system-ui, sans-serif'), W / 2,
+                   96 + rows.length * 62 + 34 + i * 30));
   };
 
   // The instrument. Everything the transcript strip could only imply, stated as a number: is the

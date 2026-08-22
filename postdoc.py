@@ -25,8 +25,21 @@ MIN_SEGMENTS = 100
 # there is no `claude` CLI in a confidential VM, and no way to carry an OAuth session into one.
 # The call is issued FROM fractal, inside the near-shim container that already holds NEAR_API_KEY,
 # so the key never moves to whatever machine is running this script.
+#
+# THE MODEL CHOICE IS THE SECURITY BOUNDARY, not the "near" engine flag. NEAR serves two kinds of
+# model over one API. Open-weight models it holds run inside its enclave and say so in their own
+# metadata ("Attested model served via Chutes TEE, verified end-to-end by NEAR AI"); the gateway's
+# Intel TDX quote is readable at /v1/attestation/report. Proprietary models — anthropic/*,
+# google/gemini*, openai/gpt-5* — cannot run there, so NEAR proxies them and the transcript
+# arrives at the vendor in the clear. Picking one of those buys anonymity of the CALLER and no
+# protection at all for the CONTENT, which is backwards for meeting notes: the substance is the
+# thing worth protecting, and it is precisely what survives any redaction pass. Default to an
+# attested model, and treat a proprietary NEAR_MODEL as sending the transcript to that vendor.
 NOTES_ENGINE = os.environ.get("NOTES_ENGINE", "near")
-NEAR_MODEL = os.environ.get("NEAR_MODEL", "anthropic/claude-sonnet-5")
+NEAR_MODEL = os.environ.get("NEAR_MODEL", "deepseek/deepseek-v3.2")
+# Measured 2026-08-21: the TEE model 502s ("model is currently unavailable") on max_tokens above
+# 8000, regardless of prompt size. The error names the wrong cause, so it reads as an outage.
+NEAR_MAX_TOKENS = int(os.environ.get("NEAR_MAX_TOKENS", "8000"))
 CLAUDE_MODEL = "opus"
 
 CAVEAT = ('*A note on the transcript: this is live ASR, not a post-pass. Names and numbers are the '
@@ -106,15 +119,20 @@ def near_notes(prompt):
     script = (
         "import os,sys,json,urllib.request\n"
         "p=sys.stdin.read()\n"
-        "b=json.dumps({'model':%r,'max_tokens':16000,'messages':[{'role':'user','content':p}]}).encode()\n"
+        "b=json.dumps({'model':%r,'max_tokens':%d,'stream':True,"
+        "'messages':[{'role':'user','content':p}]}).encode()\n"
         "r=urllib.request.Request('https://cloud-api.near.ai/v1/chat/completions',data=b,"
         "headers={'Authorization':'Bearer '+os.environ['NEAR_API_KEY'],"
         "'Content-Type':'application/json'})\n"
-        "print(json.load(urllib.request.urlopen(r,timeout=1800))"
-        "['choices'][0]['message']['content'])\n" % NEAR_MODEL)
+        "out=[]\n"
+        "for ln in urllib.request.urlopen(r,timeout=600):\n"
+        "    ln=ln.strip()\n"
+        "    if not ln.startswith(b'data: ') or ln==b'data: [DONE]': continue\n"
+        "    out.append((json.loads(ln[6:])['choices'][0].get('delta') or {}).get('content') or '')\n"
+        "sys.stdout.write(''.join(out))\n" % (NEAR_MODEL, NEAR_MAX_TOKENS))
     return subprocess.run(
         ["ssh", HOST, f"docker exec -i vexa-rig-near-shim-1 python3 -c {shlex.quote(script)}"],
-        input=prompt, stdout=subprocess.PIPE, text=True, check=True, timeout=1900).stdout
+        input=prompt, stdout=subprocess.PIPE, text=True, check=True, timeout=4200).stdout
 
 
 def claude_notes(prompt):
@@ -147,19 +165,41 @@ def existing_doc(svc, mid):
     return files[0] if files else None
 
 
-def build_markdown(mid, include_raw=False):
-    meeting = json.loads(sql(
-        "select json_build_object('code',platform_specific_id,'status',status,"
-        f"'start',extract(epoch from start_time),'end',extract(epoch from end_time)) "
-        f"from meetings where id={mid}"))
-    if meeting["status"] != "completed":
-        sys.exit(f"meeting {mid} is {meeting['status']}, not completed")
+# One conversation can span several meeting rows: every crash, eviction or rejoin starts a new
+# one. 2026-08-21 produced three rows for a single call with Ahmed. Stitching them is not merely
+# concatenation — the bot was ABSENT between rows, and an unmarked seam reads as a quiet stretch,
+# which is indistinguishable from nobody talking once Whisper's filler artifacts are in the mix.
+# So the gap is stated in the transcript, in the caveat, and to the model writing the notes.
+GAP_MARK_S = 120
+
+
+def build_markdown(mid, include_raw=False, merge=()):
+    ids = [mid, *merge]
+    rows = json.loads(sql(
+        "select coalesce(json_agg(json_build_object('id',id,'code',platform_specific_id,"
+        "'status',status,'start',extract(epoch from start_time),"
+        "'end',extract(epoch from end_time)) order by start_time), '[]') "
+        f"from meetings where id in ({','.join(str(i) for i in ids)})"))
+    if len(rows) != len(ids):
+        sys.exit(f"asked for {ids}, found {[r['id'] for r in rows]}")
+    for r in rows:
+        if r["status"] != "completed":
+            sys.exit(f"meeting {r['id']} is {r['status']}, not completed")
+    codes = {r["code"] for r in rows}
+    if len(codes) != 1:
+        sys.exit(f"refusing to stitch different rooms: {codes}")
+    meeting = {"code": rows[0]["code"], "status": "completed",
+               "start": rows[0]["start"], "end": rows[-1]["end"]}
 
     segs = json.loads(sql(
         "select coalesce(json_agg(json_build_object('t',start_time,'s',speaker,'x',text) "
-        f"order by start_time, id), '[]') from transcriptions where meeting_id={mid}"))
+        f"order by start_time, id), '[]') from transcriptions "
+        f"where meeting_id in ({','.join(str(i) for i in ids)})"))
     if len(segs) < MIN_SEGMENTS:
-        sys.exit(f"meeting {mid} has {len(segs)} segments, below the floor of {MIN_SEGMENTS}")
+        sys.exit(f"meetings {ids} have {len(segs)} segments, below the floor of {MIN_SEGMENTS}")
+
+    gaps = [(segs[i]["t"], segs[i + 1]["t"]) for i in range(len(segs) - 1)
+            if segs[i + 1]["t"] - segs[i]["t"] > GAP_MARK_S]
 
     # roster.py is the gate: it exits non-zero and names anyone it cannot reach.
     resolved = ssh(f"python3 {ARCHIVE}/roster.py {mid}")
@@ -174,7 +214,21 @@ def build_markdown(mid, include_raw=False):
             seen.add(s)
             people.append(s)
 
-    lines = [f"[{utc(s['t']):%H:%M:%S}] {s['s'] or 'Speaker'}: {s['x'].strip()}" for s in segs]
+    # Per-person steering lives in the roster, beside the address — not in code and not in the
+    # public tracker. First preference honored: a recipient known to want the raw transcript gets
+    # it, overriding the withhold-by-default. Learned 2026-08-20 when a recipient flagged the
+    # withheld-transcript line the day after the default shipped: a pipeline default must yield
+    # to what the actual recipient asked for.
+    for s_ in people:
+        if roster.get(s_, {}).get("prefs", {}).get("raw_transcript"):
+            include_raw = True
+
+    lines = []
+    for i, s_ in enumerate(segs):
+        if i and s_["t"] - segs[i - 1]["t"] > GAP_MARK_S:
+            lines.append(f"\n*** NOT RECORDED: {(s_['t'] - segs[i - 1]['t']) / 60:.0f} minutes "
+                         f"with no bot in the room — nothing was captured here ***\n")
+        lines.append(f"[{utc(s_['t']):%H:%M:%S}] {s_['s'] or 'Speaker'}: {s_['x'].strip()}")
     transcript = "\n\n".join(lines)
 
     prompt = PROMPT.format(speakers=", ".join(people),
@@ -196,6 +250,14 @@ def build_markdown(mid, include_raw=False):
         f"endpoint, transcribed live; notes and abridgement by a model reading only this "
         f"meeting's transcript, written for the participants.",
         CAVEAT,
+        # Only promise the inline marker when the raw transcript is actually attached: with it
+        # withheld there is nothing "below" to point at, and a caveat that describes a document
+        # other than the one in your hands is worse than no caveat.
+        *([("*Coverage gap: the bot was out of the room for "
+            + ", ".join(f"{(b - a) / 60:.0f} minutes from {utc(a):%H:%M} UTC" for a, b in gaps)
+            + ". Nothing from that stretch was captured"
+            + (", and it is marked inline in the transcript below" if include_raw else "")
+            + ". Absence there is missing data, not silence.*")] if gaps else []),
         notes.strip(),
     ]
     # The raw transcript is withheld from the shared doc by default — direct participant feedback
@@ -205,7 +267,10 @@ def build_markdown(mid, include_raw=False):
         parts += ["## Full raw transcript", "*Times are UTC.*", transcript]
     else:
         parts += ["*The raw ASR transcript is withheld from this document — the abridgement "
-                  "above replaces it. The raw text is retained and available on request.*"]
+                  "above replaces it. The raw text lives in the bot's own database on the "
+                  "operator's hardware (no third-party service holds it); meeting audio is "
+                  "deleted after 21 days. Ask and you get the raw text; ask and it gets "
+                  "deleted.*"]
     parts += ["*Spotted something wrong or missing? Comment on this doc — comments get read "
               "and folded into how these notes are made.*"]
     body = "\n\n".join(parts)
@@ -231,6 +296,15 @@ def share(svc, doc_id, emails):
     return granted
 
 
+def from_capture(path):
+    """Parse a `--dry-run` capture back into (title, body, emails); see the print() below."""
+    head, _, body = open(path).read().partition("\n\n")
+    title, share_line = head.split("\n")[:2]
+    return (title.removeprefix("=== ").strip(),
+            body,
+            [e.strip() for e in share_line.removeprefix("=== share with:").split(",") if e.strip()])
+
+
 def run(mid, args):
     svc = None if args.dry_run else drive()
     prev = existing_doc(svc, mid) if svc else None   # before the model call, not after
@@ -238,7 +312,11 @@ def run(mid, args):
         print(f"meeting {mid} already has a doc: {prev['name']} {prev['id']}")
         return
 
-    title, body, emails = build_markdown(mid, include_raw=args.raw)
+    # --from-file replays an approved --dry-run capture verbatim. Regenerating would produce
+    # DIFFERENT notes from the ones a human read and approved, and the doc goes to other people.
+    title, body, emails = (from_capture(args.from_file) if args.from_file
+                           else build_markdown(mid, include_raw=args.raw,
+                                              merge=[int(x) for x in args.merge.split(',') if x.strip()]))
     emails = list(dict.fromkeys(emails + args.also))
     if args.caveat:
         extra = " ".join(args.caveat)
@@ -282,6 +360,11 @@ def main():
     p.add_argument("--raw", action="store_true",
                    help="include the full raw transcript (withheld by default)")
     p.add_argument("--no-share", action="store_true")
+    p.add_argument("--from-file", metavar="PATH",
+                   help="create the doc from a saved --dry-run capture, byte for byte")
+    p.add_argument("--merge", default="", metavar="IDS",
+                   help="comma-separated extra meeting ids to stitch in (same room only) — one "
+                        "conversation split across rows by a crash, eviction or rejoin")
     p.add_argument("--delete-after", action="store_true")
     # The roster resolves SPEAKERS. Someone who attended and never said a word is invisible to it,
     # so a quiet attendee silently misses the doc — the same "shared with 3 of 4 and looks fine"

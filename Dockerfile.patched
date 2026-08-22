@@ -43,6 +43,7 @@ COPY patches/bot-capture-bridge.ts /app/core/meetings/services/bot/src/capture-b
 # canvas via getDisplayMedia — Chrome's picker is never reached), reactions, and the selfcheck
 # act the e2e harness reads. These are hot-swappable via ./hotswap.sh during development; they
 # are baked here so a rebuilt image is not silently missing them.
+COPY patches/bot-modals.ts /app/core/meetings/services/bot/src/modals.ts
 COPY patches/bot-chat.ts /app/core/meetings/services/bot/src/chat.ts
 COPY patches/bot-repetition-guard.ts /app/core/meetings/services/bot/src/repetition-guard.ts
 # capture-bridge calls playback.onAmplitude (beak driven by real TTS RMS); upstream's tts-playback
@@ -51,6 +52,7 @@ COPY patches/bot-tts-playback.ts /app/core/meetings/services/bot/src/tts-playbac
 COPY patches/bot-camera.ts /app/core/meetings/services/bot/src/camera.ts
 COPY patches/bot-reactions.ts /app/core/meetings/services/bot/src/reactions.ts
 COPY patches/bot-selfcheck.ts /app/core/meetings/services/bot/src/selfcheck.ts
+COPY patches/bot-capture-tap.ts /app/core/meetings/services/bot/src/capture-tap.ts
 COPY patches/bot-index.ts /app/core/meetings/services/bot/src/index.ts
 # 4. RECORDER CLOBBER (#16). Both the is_final chunk and close(key) assemble a master for the same
 #    key, and the second one — a lone trailing fragment, no EBML cluster, unrepairable — landed on

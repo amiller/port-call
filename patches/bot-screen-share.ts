@@ -18,6 +18,7 @@
  * immediately, so there was never an "a tab" option to click.
  */
 import type { Page } from '@vexa/remote-browser';
+import { sweep } from './modals.js';
 
 const SHARE = 'button[aria-label*="Share screen" i], button[aria-label*="Present now" i]';
 // Real Meet's stop control carries NO matching aria-label — its TEXT is
@@ -44,6 +45,7 @@ export function createScreenShareController(page: Page, platform: string): Scree
     async share(text: string): Promise<void> {
       if (platform !== 'google_meet') throw new Error(`screen_share unsupported on ${platform}`);
       await page.bringToFront();
+      await sweep(page, 'share', (m) => console.log(m));
       await page.evaluate((t) => (globalThis as any).__vexaCam?.set(t, 'presenting'), text);
       await wake();
       await page.locator(SHARE).first().waitFor({ state: 'visible', timeout: 20_000 });

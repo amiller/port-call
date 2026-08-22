@@ -200,3 +200,21 @@ three.js render harness works locally. Parked mid-flight; head framing needs mor
 `router_write` was blocked by the auto-mode classifier. Drafts in the session scratchpad
 (`note-1-header.md`, `note-2-reactions.md`). One describes a private meeting's dynamics and should
 be scrubbed the same way the issues were before it goes anywhere.
+
+## Late night: participant feedback became the doc pipeline (2026-08-19, after midnight UTC)
+
+- Meeting 115 (69 min) was a live evaluation of the bot's summaries by a participant who does
+  expert manual post-processing. Their feedback is now IN postdoc.py: <=300-word forwardable
+  Digest (third parties neutral — first generation violated this, doc replaced in place with
+  --update), abridged corrected transcript REPLACING raw (raw stays in postgres, --raw opts in),
+  privacy rule first, comment invite, writer access granted on request. Their doc also carries an
+  ARIA-cohort context block sourced from meeting 112 — with 112's budget figures deliberately kept
+  out — as a demo of recipient-aware crafting.
+- #16 guard: THREE saves today (meetings 112, 113, 115). Recording 115 (66.7MB) archived by hand;
+  upload still 500s (#26).
+- Issues #31–#38 filed from the evening's lessons; PII sweep over #23–#38 clean ("a participant",
+  never a name; `avatar: tina` in #37 is a public code identifier, matching issue #6's precedent).
+- Everything committed on `night-19-aug` and promoted — GATE GREEN, staging at bc2d79d. Prod runs
+  the same code via hotswap but main/prod deploy is Andrew's call, as is pushing to origin
+  (origin/main now 10+ commits behind).
+- Sidecars (fwd.py, goodpoint.py) all stopped; the lifecycle problem they demonstrate is #35.
