@@ -1,0 +1,23 @@
+# Two seats, not one. A full loopback e2e needs a bot that SPEAKS and a bot that HEARS in the same
+# call: seat A plays TTS through tts_sink and renders the camera HUD, seat B captures call_out and
+# transcribes. No human in the room, which is what makes it a test rather than a demo.
+services:
+  signal-a:
+    build: .
+    container_name: port-call-signal-a
+    environment: [SEAT=a]
+    volumes: [signal-a-data:/data]
+    ports: ["127.0.0.1:9333:9334", "127.0.0.1:6080:6080"]   # CDP is unauthenticated: loopback only, reach via ssh tunnel
+    shm_size: 512m
+    restart: unless-stopped
+  signal-b:
+    build: .
+    container_name: port-call-signal-b
+    environment: [SEAT=b]
+    volumes: [signal-b-data:/data]
+    ports: ["127.0.0.1:9335:9334", "127.0.0.1:6081:6080"]
+    shm_size: 512m
+    restart: unless-stopped
+volumes:
+  signal-a-data:
+  signal-b-data:
