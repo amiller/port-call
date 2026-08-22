@@ -6,6 +6,13 @@ from fastapi.responses import JSONResponse
 
 NEAR = "https://cloud-api.near.ai/v1/audio/transcriptions"
 KEY = os.environ["NEAR_API_KEY"]
+# SET-BUT-EMPTY is the dangerous case, and os.environ does not catch it. In a dstack CVM the
+# encrypted env does not reach docker compose interpolation, so `${NEAR_API_KEY}` resolves to ""
+# and this shim used to boot happily, report {"status":"healthy"} to every probe, and 401 every
+# single transcription. Fail at import instead: a crash-looping container is visible, a healthy
+# one that transcribes nothing is not.
+if not KEY.strip():
+    raise SystemExit("near-shim: NEAR_API_KEY is empty — refusing to start and pretend to transcribe")
 # metrics = content-free diagnostics (default when set); text = also log transcripts, for debugging only
 LOG = os.environ.get("SHIM_LOG", "")
 app = FastAPI()

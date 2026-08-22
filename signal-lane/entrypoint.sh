@@ -22,6 +22,9 @@ pactl set-default-source virtual_mic
 Xvfb :99 -screen 0 1280x800x24 -ac +extension GLX +render -noreset &
 export DISPLAY=:99
 for _ in $(seq 1 30); do xdpyinfo -display :99 >/dev/null 2>&1 && break; sleep 1; done
+# Assert, do not hope — its PulseAudio twin above does the same. Without this a slow or dead Xvfb
+# falls through and signal-desktop fails later with something that looks unrelated.
+xdpyinfo -display :99 >/dev/null
 
 # --password-store=basic is the whole reason this profile is portable: without it Electron seals
 # the SQLCipher key against the host keyring (safeStorageBackend=gnome_libsecret) and the directory

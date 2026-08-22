@@ -50,6 +50,14 @@
       }
       return null;
     },
-    inCall: () => { const m = plain(document.body.innerText).match(/(\d+)\s+(?:people|person)/); return m ? +m[1] : 0; },
+    // SCOPED to the calling container on purpose. A body-wide match for "N people" also hits the
+    // conversation list and call-link details panels, so the load-bearing join assertion could read
+    // 2 while the seat is not in a call at all. No container ⇒ not in a call ⇒ 0.
+    inCall: () => {
+      const box = document.querySelector('.module-calling__modal-container, .module-calling__container');
+      if (!box) return 0;
+      const m = plain(box.innerText).match(/(\d+)\s+(?:people|person|in call)/);
+      return m ? +m[1] : 0;
+    },
   };
 })();

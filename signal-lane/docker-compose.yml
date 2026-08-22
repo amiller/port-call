@@ -5,7 +5,6 @@ services:
   signal-a:
     build: .
     container_name: port-call-signal-a
-    environment: [SEAT=a]
     volumes: [signal-a-data:/data]
     ports: ["127.0.0.1:9333:9334", "127.0.0.1:6080:6080"]   # CDP is unauthenticated: loopback only, reach via ssh tunnel
     shm_size: 512m
@@ -13,7 +12,6 @@ services:
   signal-b:
     build: .
     container_name: port-call-signal-b
-    environment: [SEAT=b]
     volumes: [signal-b-data:/data]
     ports: ["127.0.0.1:9335:9334", "127.0.0.1:6081:6080"]
     shm_size: 512m

@@ -67,7 +67,10 @@ clean. Sound effects and TTS arrive as authored — a real advantage of the lane
    chain — its own docstring warns about this.
 8. **`pulseaudio --system` denies non-`pulse-access` users**; without `usermod -aG pulse-access root`
    every `pactl` call in a container entrypoint dies with "Access denied".
-9. **Electron ignores `--remote-debugging-address`** and binds CDP to loopback regardless, so a
+9. **Each `sgnl://` URL push spawns a launcher process.** They forward the URL to the running
+   instance and should exit; 22 accumulated once and one of them stole the CDP port. The e2e now
+   reaps them after each push — the entrypoint fix covered only the stale-PulseAudio half.
+10. **Electron ignores `--remote-debugging-address`** and binds CDP to loopback regardless, so a
    published container port reaches nothing. socat republishes it.
 
 ## What is in the tree
@@ -78,21 +81,19 @@ clean. Sound effects and TTS arrive as authored — a real advantage of the lane
 `port-call-signal-a` and `port-call-signal-b`. CDP is bound to **loopback only** and reached over an
 ssh tunnel — it is unauthenticated and would be total control of a linked account.
 
-## The two-seat e2e — RAN, 11 pass / 1 fail
+## The two-seat e2e — RAN
 
-`signal-lane/e2e.sh`, unattended, two container seats on fractal:
-
-```
-PASS seat A / seat B linked            PASS both seats see 2 in call
-PASS virtual_mic + call_out selected   PASS TTS played into seat A's virtual mic
-PASS call link created                 PASS transcript carries the spoken phrase
-PASS both seats out of any prior call  FAIL seat B's remote video looks blank
-                                       PASS both seats left the call
-```
+`signal-lane/e2e.sh`, unattended, two container seats on fractal. The first run reported
+**11 pass / 1 fail**, but a review of the harness found that two of those PASS lines were printed
+UNCONDITIONALLY — `reset.js` and `leave.js` had their return values piped to /dev/null. The honest
+reading of that run is **9 tested, 2 asserted, 1 failed**. Both are now checked, along with eight
+other false-green paths listed below; the harness collects screenshots and the transcript as
+evidence so a green line always has an artifact behind it.
 
 **Audio loopback is closed**: piper TTS → seat A `tts_sink` → `virtual_mic` → Signal → seat B
 `call_out` → `parec` → near.ai whisper → *"The harbour and the cricket share a velvet morning."*
-(2/3 keyword match only because Whisper spelled it "harbour"; the phrase came back verbatim.)
+Effectively exact — 2/3 keywords only because Whisper spelled it "harbour", which is also why the
+matcher now compares on a stem.
 
 **Camera loopback does NOT work in-container.** `getUserMedia` on seat A does return the HUD canvas
 (1280x720, verified), the fake `Vexa Camera` device enumerates, and Signal's control reads "camera

@@ -11,7 +11,13 @@
 # env FILE (-e cvm.env), with explicit -e KEY=VALUE, and finally without interpolation, which is
 # the only one that booted. `image:` cannot be a pass-through at all, so pinning is the only
 # option — and it is the better one here, since the compose hash then covers the exact image.
-# Bump the two tags on release.
+# Bump the two tags on release — nothing does it automatically; promote.sh/deploy-prod.sh neither
+# build nor push these images, so this file WILL fall behind prod if the CVM lane goes real.
+#
+# DO NOT "tidy up" the two ${VAR} environment mappings by deleting them. The upstream image bakes
+# ENV ADMIN_API_TOKEN=changeme, so removing the mapping does not leave the token unset — it leaves
+# a publicly known admin token on a public gateway. Empty is fail-closed (admin routes 500, no bot
+# can be spawned); `changeme` is not.
 #
 # Why a second file rather than the main one: a CVM is handed ONE compose file and nothing else.
 # No build context, no repo, no host filesystem. Phala's own pre-deploy rules reject `build:`,
