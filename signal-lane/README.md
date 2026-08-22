@@ -5,7 +5,7 @@ transcribe. `./e2e.sh` proves it with no human in the room: seat A speaks, seat 
 
 ```bash
 docker compose up -d --build          # two seats, A and B
-./e2e.sh                              # 12 checks, ~3 min
+./e2e.sh                              # 12 checks + evidence dir, ~3 min
 ./watch-and-run.sh                    # poll until both seats are linked, then run e2e
 ```
 
@@ -35,6 +35,10 @@ from the real window rather than a screenshot that expires:
     http://127.0.0.1:6080/vnc.html?autoconnect=1   # seat A, over an ssh tunnel
     http://127.0.0.1:6081/vnc.html?autoconnect=1   # seat B
 
+The containers publish CDP on fractal's loopback as 9333 (A) and 9335 (B); the tunnel this repo
+assumes is `-L 9334:127.0.0.1:9333 -L 9335:127.0.0.1:9335`, which is why `e2e.sh` defaults
+`A_PORT=9334` and `B_PORT=9335`.
+
 The profile is portable **only because** the entrypoint passes `--password-store=basic` at first
 launch; otherwise Electron seals the SQLCipher key against the host keyring and the volume cannot
 be moved. Set it before linking or it is too late.
@@ -45,10 +49,10 @@ be moved. Set it before linking or it is too late.
 |---|---|
 | `Dockerfile`, `entrypoint.sh` | Signal + Xvfb + PulseAudio graph + x11vnc + socat CDP bridge |
 | `docker-compose.yml` | two seats; CDP and VNC bound to **loopback only** |
-| `cdp.mjs` | `eval` / `shot` / `init` / `perms` against one seat |
+| `cdp.mjs` | `eval` / `shot` / `init` / `perms` against one seat; every call is timeout-bounded |
 | `js/lib.js` | page-side helpers, prepended to every action |
 | `js/hud.js` | **generated** — see `js/README.md` |
-| `e2e.sh` | the twelve checks |
+| `e2e.sh` | the twelve checks. Serialized with a flock, resets both seats on any exit, picks a NEW phrase each run, and writes screenshots of both seats, the captured wav and the transcript to an evidence dir it prints |
 
 CDP is unauthenticated and grants total control of a linked Signal account. Never expose it beyond
 loopback; reach it over an ssh tunnel.

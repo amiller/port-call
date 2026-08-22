@@ -3,10 +3,10 @@
 #
 #   ./deploy-prod.sh [ref]        default: staging
 #
-# This is the one step that is NOT automatic. Staging (rig 4) moves by itself the moment a swarm
-# agent's branch passes the gate; prod moves when a human says so. That split is the convention the
-# oauth3 side already uses — agents commit to branches and never deploy, and staging vs prod is a
-# deploy target rather than a branch.
+# Staging (rig 4) moves by ITSELF the moment a branch passes the gate; prod moves only when this
+# script runs. That is a difference in trigger, not in permission — nothing here is reserved for a
+# particular kind of operator. Run it whenever staging is green and you want rig 1 on that code.
+# Staging vs prod is a deploy target, not a branch.
 #
 # It deploys by hot-swap, NOT by recreating the container: `docker compose up -d` recreates if the
 # compose file drifted, and that destroys in-container recordings and act logs. Archive first

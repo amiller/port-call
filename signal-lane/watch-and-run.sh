@@ -8,7 +8,14 @@ cd "$(dirname "$0")"
 A=${A_PORT:-9334}; B=${B_PORT:-9335}
 DEADLINE=$(( $(date +%s) + ${WAIT_SECS:-3600} ))
 cat js/lib.js js/link-state.js > /tmp/pc-linkstate.js
-linked() { node cdp.mjs "$1" eval /tmp/pc-linkstate.js 2>/dev/null | grep -q '"linked": *true'; }
+# Distinguish "answered, not linked" from "could not reach the seat". Swallowing both made a dead
+# tunnel look identical to an unscanned QR, so the watcher polled for an hour and then reported the
+# wrong diagnosis.
+probe() { node cdp.mjs "$1" eval /tmp/pc-linkstate.js 2>/tmp/pc-probe-err.$1; }
+linked() {
+  local out; out=$(probe "$1") || { echo "[watch] seat on port $1 UNREACHABLE: $(tail -1 /tmp/pc-probe-err.$1)" >&2; return 1; }
+  echo "$out" | grep -q '"linked": *true'
+}
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
   if linked "$A" && linked "$B"; then
     echo "[watch] both seats linked at $(date +%H:%M:%S) — running e2e"

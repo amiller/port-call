@@ -322,9 +322,10 @@ Three things are called "vexa" here and only the first is the project. Ordered b
 ### Phase 3 — the GitHub repo  (~15 min, one-way-ish)  [DONE 2026-08-22]
 - [x] Rename `amiller/vexa-poc` → `port-call`; `git remote set-url origin`
 - [ ] Optionally rename the local checkout `~/projects/vexa-poc`
-- GitHub Pages follows the rename: `amiller.github.io/vexa-poc` → `amiller.github.io/port-call`,
-  still built from `main` + `/docs`. Pages only redeploys when `main` moves, so the site keeps
-  serving the last promoted commit until then.
+- Pages now serves `amiller.github.io/port-call` from `main` + `/docs`, and only redeploys when
+  `main` moves. **The old Pages URL is NOT redirected** — `amiller.github.io/vexa-poc` returns 404.
+  GitHub redirects repo URLs, not Pages URLs, so the 10 `github.com/amiller/vexa-poc` issue links
+  in `docs/` keep working while any external link to the old *site* is dead.
 - GitHub permanently redirects the old URLs, so the 10 issue links in `docs/` keep working and
   are worth leaving alone rather than rewriting.
 - **Do it before the first push.** `origin/main` is currently behind by a full day's work, so

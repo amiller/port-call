@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Land finished work on `staging`. THIS IS THE AGENT'S FINISHING MOVE, not a human's — an agent that
-# believes it is done runs this, and the merge happens by itself if the gate is green. Nobody should
-# have to shepherd branches into a shared stream by hand.
+# Land finished work on `staging`. This is the finishing move for anything that believes it is
+# done: run it, and the merge happens by itself if the gate is green. Nobody should have to
+# shepherd branches into a shared stream by hand.
 #
 #   ./promote.sh <branch>
 #
-# The merge is automatic; what is NOT automatic is prod. Staging is rig 4, prod is rig 1 — the rig
-# Andrew takes meetings on — and that one moves only when a human runs ./deploy-prod.sh.
+# The merge is automatic; prod is not. Staging is rig 4, prod is rig 1 — the rig meetings actually
+# run on — and it moves when ./deploy-prod.sh runs. A separate step, not a separate class of
+# operator: weigh the meeting schedule, not a permission rule.
 #
 # --no-ff is not cosmetic: a fast-forward creates no merge commit, and the gate lives in the
 # pre-merge-commit hook. Fast-forwarding would land unproven work silently.
