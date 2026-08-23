@@ -3,14 +3,22 @@
 #   phala deploy -n port-call -c docker-compose.cvm.yml \
 #     -e NEAR_API_KEY=... -e ADMIN_TOKEN=... --vcpu 4 --memory 8192 --disk-size 60
 #
-# IMAGES ARE PINNED LITERALLY, and the two secrets use PLAIN ${VAR}, never `${VAR:?...}`. Both are
-# forced by dstack: its "Processing encrypted env" step does NOT make values visible to docker
-# compose INTERPOLATION inside the CVM, so any `:?` required-variable form aborts the boot with
-# "required variable X is missing a value" — the CVM reaches `running` with zero containers, which
-# looks like a healthy deploy from the outside. Verified 2026-08-22 across three deploys: with an
-# env FILE (-e cvm.env), with explicit -e KEY=VALUE, and finally without interpolation, which is
-# the only one that booted. `image:` cannot be a pass-through at all, so pinning is the only
-# option — and it is the better one here, since the compose hash then covers the exact image.
+# IMAGES ARE PINNED LITERALLY and the secrets use PLAIN ${VAR}, never `${VAR:?...}`. Why:
+#
+# dstack keeps an ALLOWLIST of env names — `allowed_envs` in the deployed app manifest, which for
+# this app is exactly [NEAR_API_KEY, ADMIN_TOKEN, DSTACK_AUTHORIZED_KEYS]. Names on it arrive;
+# names off it (VEXA_IMAGE, SHIMS_IMAGE, TTS_ENGINE) do not, and a `${VAR:?...}` reference to a
+# name that did not arrive ABORTS the boot: the CVM reaches `running` with zero containers, which
+# from outside looks like a healthy deploy. That killed port-call-test and -test2.
+#
+# The secrets themselves DO reach the containers. Proven on port-call-test4: this compose's
+# near-shim image refuses to start on an empty NEAR_API_KEY ("refusing to start and pretend to
+# transcribe", verified by running the same image with the var empty), and in the CVM its uvicorn
+# bound normally. So plain ${VAR} for allowlisted names is correct and sufficient — an earlier
+# reading of this file, that both secrets resolve to empty, was an inference and it was wrong.
+#
+# `image:` cannot be a pass-through at all, so pinning is the only option — and it is the better
+# one here, since the compose hash then covers the exact image.
 # Bump the two tags on release — nothing does it automatically; promote.sh/deploy-prod.sh neither
 # build nor push these images, so this file WILL fall behind prod if the CVM lane goes real.
 #
@@ -56,7 +64,7 @@ services:
       retries: 20
 
   near-shim:
-    image: ghcr.io/amiller/port-call-shims:8172960
+    image: ghcr.io/amiller/port-call-shims:e7bcf85
     command: uvicorn near-shim:app --host 0.0.0.0 --port 8001
     environment:
       NEAR_API_KEY: ${NEAR_API_KEY}
@@ -64,14 +72,14 @@ services:
     restart: unless-stopped
 
   tts-shim:
-    image: ghcr.io/amiller/port-call-shims:8172960
+    image: ghcr.io/amiller/port-call-shims:e7bcf85
     command: uvicorn tts-shim:app --host 0.0.0.0 --port 8002
     environment:
       TTS_ENGINE: piper
     restart: unless-stopped
 
   vexa-lite:
-    image: ghcr.io/amiller/port-call-lite:8172960
+    image: ghcr.io/amiller/port-call-lite:e7bcf85
     shm_size: 2gb
     depends_on:
       postgres: {condition: service_healthy}
