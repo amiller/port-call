@@ -57,6 +57,33 @@ be moved. Set it before linking or it is too late.
 CDP is unauthenticated and grants total control of a linked Signal account. Never expose it beyond
 loopback; reach it over an ssh tunnel.
 
+## Running it somewhere other than fractal
+
+Four requirements, and only one is a real obstacle:
+
+| | fractal | zed | dstack CVM |
+|---|---|---|---|
+| docker | ✅ | ✅ 24.0.7 | ✅ |
+| `v4l2loopback` for the camera | ✅ loaded | ❌ **module not installed** | ❓ needs a guest-kernel module |
+| two linked seats | ✅ | copy the volumes | copy the volumes |
+| TTS/STT shims reachable | ✅ rig 4 | must run there too | must run there too |
+
+`SIGNAL_HOST`, `SHIM_HOST`, `TTS_CONTAINER` and `STT_CONTAINER` are all env knobs, so the harness
+itself is not fractal-bound — `SIGNAL_HOST=zed ./e2e.sh` is the whole invocation once the host is
+prepared. `./ensure-camera.sh <host>` loads the loopback module idempotently and runs before every
+e2e; it needs this on the target host and nothing else:
+
+    (root) NOPASSWD: /usr/sbin/modprobe v4l2loopback *, /usr/sbin/modprobe -r v4l2loopback
+
+**The seat profiles are portable.** They were created with `--password-store=basic`, so the
+`signal-a-data` / `signal-b-data` volumes can be copied to another host instead of re-scanning two
+QR codes. That is the one piece of this that would otherwise need a human with a phone.
+
+**The camera is the part that does not travel.** zed has no `v4l2loopback` module installed and no
+passwordless sudo, so it needs `apt install v4l2loopback-dkms` plus the sudoers line first. In a
+CVM the module would have to exist in the guest kernel, which is not something a tenant controls —
+so a dstack deployment should expect join/speak/transcribe and no camera until that is settled.
+
 ## What this cannot prove
 
 Both seats are linked devices of **one account**, so Signal sees one identity twice. The e2e

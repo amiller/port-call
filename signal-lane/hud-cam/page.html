@@ -13,9 +13,11 @@
   // stream back into a video element. Same HUD the Meet bot draws, same code, no fork.
   const cam = globalThis.__vexaCam;
   document.getElementById('v').srcObject = cam.stream;
+  // Caption via hud({line, speaker}), NOT set(title, sub). set() writes a title this background
+  // does not draw; the big centre text is the last TRANSCRIPT line, falling back to
+  // "say something…", and the top strip is the speaker. Commanding those is what makes a frame
+  // identifiable as belonging to one run.
+  globalThis.setHud = (line, speaker) => cam.hud({ line, speaker });
   const q = new URLSearchParams(location.search);
-  cam.set(q.get('text') || 'PORT CALL', q.get('sub') || '');
-  // Let the harness change the caption at runtime without reloading: the e2e writes a per-run
-  // nonce here so the frame that reaches the far seat is identifiably from THIS run.
-  globalThis.setHud = (text, sub) => cam.set(text, sub);
+  if (q.get('line')) setHud(q.get('line'), q.get('speaker') || 'PORT CALL');
 </script>

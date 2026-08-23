@@ -44,6 +44,8 @@ websockify --web=/usr/share/novnc 6080 localhost:5900 &
 # Electron IGNORES --remote-debugging-address and binds CDP to 127.0.0.1 only, so nothing outside
 # the container can reach it. socat republishes it on 9334 for the compose port mapping.
 socat TCP-LISTEN:9334,fork,reuseaddr TCP:127.0.0.1:9333 &
+# The hud-cam chromium's own CDP, so the caption on the transmitted frames can be set at runtime.
+socat TCP-LISTEN:9401,fork,reuseaddr TCP:127.0.0.1:9400 &
 
 # Feed the HUD into the loopback camera when the host has one passed through. Absent device ⇒ this
 # seat simply has no camera, which is the honest state rather than a crash: only the speaker seat

@@ -9,7 +9,7 @@ services:
     # video_nr=0 card_label=PortCallCam exclusive_caps=1. Only the speaker seat needs it.
     devices: ["/dev/video0:/dev/video0"]
     volumes: [signal-a-data:/data]
-    ports: ["127.0.0.1:9333:9334", "127.0.0.1:6080:6080"]   # CDP is unauthenticated: loopback only, reach via ssh tunnel
+    ports: ["127.0.0.1:9333:9334", "127.0.0.1:6080:6080", "127.0.0.1:9336:9401"]   # CDP is unauthenticated: loopback only, reach via ssh tunnel
     shm_size: 512m
     restart: unless-stopped
   signal-b:
