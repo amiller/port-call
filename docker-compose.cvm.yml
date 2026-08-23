@@ -97,6 +97,10 @@ services:
       - "8001:8001"
     volumes:
       - recordings:/var/lib/vexa/recordings
+      # Same reasoning as the rig compose: a signed-in profile only survives on a volume. Populate
+      # it with `phala cp` (SSH into a CVM works: <app-id>-22.<base-domain> on :443) — without it
+      # the bot joins anonymously and only OPEN rooms work.
+      - google-session:/var/lib/vexa/google-session-live
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"
@@ -112,5 +116,6 @@ services:
     restart: unless-stopped
 
 volumes:
+  google-session:
   pgdata:
   recordings:
