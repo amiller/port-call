@@ -88,3 +88,16 @@ RUN cd /app/core/meetings/services/bot && /app/node_modules/.bin/tsc \
  && grep -q createReactionController dist/reactions.js \
  && grep -q 'DROPPED shrinking' dist/recording.js \
     || (echo "bot dist: screen_share missing, or the #16 non-shrinking recorder sink is absent" && exit 1)
+
+# 4. ADMIN ROUTES THROUGH THE PUBLIC EDGE. admin-api binds 0.0.0.0:8001 already, but a dstack
+#    gateway exposes exactly ONE port per app and a webhost pod tenant is a single container, so
+#    :8001 never gets a hostname. relaunch.sh mints tokens with `docker exec … curl 127.0.0.1:8001`,
+#    which has no equivalent off-box — meaning a hosted deployment could never mint a bot token and
+#    POST /bots was unreachable however healthy /health looked. This adds /admin/users and
+#    /admin/users/{id}/tokens to the gateway as a passthrough guarded by admin-api's own
+#    X-Admin-API-Key. The gateway gains no authority; it stops being the reason the authority is
+#    unreachable.
+COPY patches/gateway-app.py /app/gateway/src/gateway/app.py
+RUN grep -q "_forward_admin" /app/gateway/src/gateway/app.py \
+ && /opt/venvs/gateway/bin/python -c "import ast,sys; ast.parse(open('/app/gateway/src/gateway/app.py').read())" \
+ || (echo "gateway admin passthrough missing or unparseable" && exit 1)
