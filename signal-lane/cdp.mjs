@@ -60,8 +60,10 @@ if (cmd === 'perms') {
 
 // A first-join permission prompt opens as its OWN target, not a node in the main page. Anything
 // driving Signal has to know that or it hangs forever waiting on a modal it cannot see.
-const page = list.find(t => t.type === 'page' && t.url.includes('background.html'));
-if (!page) { console.error('no background.html target; targets: ' + list.map(t => t.url).join(', ')); process.exit(3); }
+// Default is Signal's own page; CDP_TARGET selects another (the hud-cam chromium serves page.html).
+const want = process.env.CDP_TARGET || 'background.html';
+const page = list.find(t => t.type === 'page' && t.url.includes(want));
+if (!page) { console.error(`no ${want} target; targets: ` + list.map(t => t.url).join(', ')); process.exit(3); }
 const { ws, ready, send } = session(page);
 await ready;
 

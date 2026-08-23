@@ -21,12 +21,18 @@ cd "$(dirname "$0")"
 # tunnel is  -L 9334:127.0.0.1:9333  -L 9335:127.0.0.1:9335 . A_PORT is 9334 for that reason.
 A=${A_PORT:-9334}
 B=${B_PORT:-9335}
+AHUD=${A_HUD_PORT:-9336}     # seat A's hud-cam chromium — the source of the frames Signal sends
 CA=port-call-signal-a
 CB=port-call-signal-b
-HOST=${SIGNAL_HOST:-fractal}
-RIG=${RIG:-4}                # which rig's shims to borrow for TTS + transcription
-TTS=vexa-rig$RIG-tts-shim-1
-STT=vexa-rig$RIG-near-shim-1
+HOST=${SIGNAL_HOST:-fractal}          # where the two Signal seats run
+SHIM_HOST=${SHIM_HOST:-$HOST}         # where the TTS/STT shims run; usually the same box
+RIG=${RIG:-4}                         # which rig's shims to borrow
+TTS=${TTS_CONTAINER:-vexa-rig$RIG-tts-shim-1}
+STT=${STT_CONTAINER:-vexa-rig$RIG-near-shim-1}
+# Portability, deliberately explicit: this lane needs a host with (1) docker, (2) the v4l2loopback
+# module for the camera, (3) the two seats linked, and (4) the shims reachable. Only (2) is a real
+# obstacle elsewhere — see README. The seat profiles ARE portable between hosts because they were
+# created with --password-store=basic, so the volumes can be copied rather than re-scanned.
 SECS=${SECS:-22}             # capture window on seat B
 OUT=${OUT:-/tmp/signal-e2e-$(date +%Y%m%d-%H%M%S)}
 mkdir -p "$OUT"
@@ -68,6 +74,7 @@ echo "run phrase: $PHRASE"
 echo "evidence:   $OUT"
 
 echo "== preconditions =="
+./ensure-camera.sh "$HOST" || { bad "no loopback camera on $HOST"; exit 1; }
 for pair in "$A A" "$B B"; do
   set -- $pair
   linked=$(seat "$1" link-state.js | jqf linked)
@@ -82,7 +89,11 @@ node cdp.mjs "$A" init js/hud.js > /dev/null
 sleep 8
 seat "$A" set-devices.js
 raw "$A" "globalThis.__vexaCam.set('PORT CALL E2E', '$W1-$W2-$W3'); globalThis.__pcCam = true; 'ok'" > /dev/null
-ok "seat A: virtual_mic + call_out selected, HUD injected"
+# Caption the frames that actually LEAVE this seat. Signal transmits hud-cam's chromium output via
+# the loopback camera, not the HUD living in Signal's own renderer — so captioning only the latter
+# left the evidence screenshots showing a default caption and identifying no particular run.
+CDP_TARGET=page.html node cdp.mjs "$AHUD" eval -e "setHud('$W1 $W2 $W3', 'PORT CALL E2E')" > /dev/null
+ok "seat A: virtual_mic + call_out selected, HUD injected and captioned"
 
 echo "== configure seat B (listener) =="
 seat "$B" set-devices.js
@@ -134,7 +145,8 @@ shot "$B" joined-seat-b
 echo "== speak: TTS on A -> capture on B =="
 # Delete the previous run's capture EVERYWHERE first. The containers persist between runs, so a
 # capture that never starts would otherwise be papered over by docker cp shipping the old wav.
-ssh "$HOST" "docker exec $CB rm -f /tmp/cap.wav; rm -f /tmp/cap.wav; docker exec $STT rm -f /tmp/cap.wav" 2>/dev/null || true
+ssh "$HOST" "docker exec $CB rm -f /tmp/cap.wav; rm -f /tmp/cap.wav" 2>/dev/null || true
+ssh "$SHIM_HOST" "docker exec $STT rm -f /tmp/cap.wav" 2>/dev/null || true
 ssh "$HOST" "docker exec $CB sh -c 'parec -d call_out.monitor --file-format=wav --format=s16le --rate=16000 --channels=1 /tmp/cap.wav >/dev/null 2>&1 &'"
 sleep 2
 # TTS is the rig's own shim (piper, local — no meeting text leaves the machine), piped straight
@@ -142,7 +154,7 @@ sleep 2
 # The shim returns HEADERLESS raw PCM (s16le/24000/mono) because Vexa pipes it into `paplay --raw`;
 # a WAV header would be played as noise. And unmute first: a muted sink's monitor records pure
 # silence, which is indistinguishable from a dead audio chain (tts-shim.py's own hard-won note).
-ssh "$HOST" "docker exec $TTS python3 -c \"
+ssh "$SHIM_HOST" "docker exec $TTS python3 -c \"
 import urllib.request, json
 b=json.dumps({'model':'tts-1','input':'''$PHRASE''','voice':'auto'}).encode()
 r=urllib.request.Request('http://localhost:8002/v1/audio/speech',data=b,headers={'Content-Type':'application/json'})
@@ -171,15 +183,37 @@ awk "BEGIN{exit !($CSECS > 3)}"   && ok "capture is $CSECS s long"        || bad
 [ "$CPEAK" -gt 2000 ]             && ok "capture is not silence (peak $CPEAK)" || bad "capture is effectively silent (peak $CPEAK)"
 
 echo "== camera loopback: A's HUD seen from B =="
+shot "$A" camera-seat-a
 shot "$B" camera-seat-b
 FRAME=$(seat "$B" remote-frame.js); echo "  $FRAME"
 STATE=$(echo "$FRAME" | jqf state)
 [ "$STATE" = "drawing" ] && ok "seat B is rendering a non-blank remote video" \
                          || bad "seat B remote video state=$STATE (see $OUT/camera-seat-b.png)"
 
+# "Non-blank" is NOT "our HUD": Chromium's --use-fake-device pattern is non-blank too, and it
+# passed the spread check while both seats showed a green test card. Compare what A is DRAWING
+# against what B is RECEIVING; only agreement means the HUD travelled.
+raw "$A" "globalThis.__pcSigSource='hud'; 'ok'" > /dev/null
+raw "$B" "globalThis.__pcSigSource='remote'; 'ok'" > /dev/null
+seat "$A" frame-signature.js > "$OUT/sig-a-hud.json"
+seat "$B" frame-signature.js > "$OUT/sig-b-remote.json"
+DIST=$(python3 -c "
+import json
+a=json.load(open('$OUT/sig-a-hud.json')); b=json.load(open('$OUT/sig-b-remote.json'))
+if a.get('state')!='ok' or b.get('state')!='ok':
+    print('-1 %s/%s' % (a.get('state'), b.get('state')))
+else:
+    d=sum(abs(x-y) for pa,pb in zip(a['sig'],b['sig']) for x,y in zip(pa,pb))/27.0
+    print('%.1f ok' % d)")
+set -- $DIST; MEANDIFF=$1; SIGSTATE=$2
+echo "  signature mean channel distance A(hud) vs B(remote): $MEANDIFF ($SIGSTATE)"
+awk "BEGIN{exit !($MEANDIFF >= 0 && $MEANDIFF < 60)}" \
+  && ok "what B receives matches what A draws — the HUD travelled" \
+  || bad "B is not showing A's HUD (distance $MEANDIFF; $SIGSTATE) — compare $OUT/camera-seat-a.png and $OUT/camera-seat-b.png"
+
 echo "== transcript =="
-ssh "$HOST" "docker cp /tmp/cap.wav $STT:/tmp/cap.wav" >/dev/null
-ssh "$HOST" "docker exec $STT python3 -c \"
+ssh "$SHIM_HOST" "docker cp /tmp/cap.wav $STT:/tmp/cap.wav" >/dev/null
+ssh "$SHIM_HOST" "docker exec $STT python3 -c \"
 import urllib.request, json, uuid
 b=open('/tmp/cap.wav','rb').read(); bd=uuid.uuid4().hex
 p=[('--'+bd+'\r\nContent-Disposition: form-data; name=\\\"response_format\\\"\r\n\r\nverbose_json\r\n').encode(),

@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Port Call HUD source</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  video { display: block; width: 100vw; height: 100vh; object-fit: contain; background: #000; }
+</style>
+<video id="v" autoplay muted playsinline></video>
+<script src="hud.js"></script>
+<script>
+  // hud.js installs __vexaCam and exposes its canvas as a MediaStream. The canvas itself is
+  // detached by design, so the only way to put it on a screen ffmpeg can grab is to play the
+  // stream back into a video element. Same HUD the Meet bot draws, same code, no fork.
+  const cam = globalThis.__vexaCam;
+  document.getElementById('v').srcObject = cam.stream;
+  // Caption via hud({line, speaker}), NOT set(title, sub). set() writes a title this background
+  // does not draw; the big centre text is the last TRANSCRIPT line, falling back to
+  // "say something…", and the top strip is the speaker. Commanding those is what makes a frame
+  // identifiable as belonging to one run.
+  globalThis.setHud = (line, speaker) => cam.hud({ line, speaker });
+  const q = new URLSearchParams(location.search);
+  if (q.get('line')) setHud(q.get('line'), q.get('speaker') || 'PORT CALL');
+</script>
