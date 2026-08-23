@@ -182,6 +182,29 @@ echo "  captured ${CSECS}s peak=$CPEAK rms=$CRMS -> $OUT/capture.wav"
 awk "BEGIN{exit !($CSECS > 3)}"   && ok "capture is $CSECS s long"        || bad "capture too short ($CSECS s) — parec never ran"
 [ "$CPEAK" -gt 2000 ]             && ok "capture is not silence (peak $CPEAK)" || bad "capture is effectively silent (peak $CPEAK)"
 
+echo "== reactions: A sends, B sees =="
+REACT=$(seat "$A" react.js)
+echo "  $REACT"
+RSENT=$(echo "$REACT" | jqf sent)
+[ "$RSENT" = "True" ] && ok "seat A sent a reaction ($(echo "$REACT" | jqf emoji))" \
+                      || bad "seat A could not send a reaction"
+sleep 1
+shot "$B" reaction-seat-b
+shot "$A" reaction-seat-a
+
+echo "== screenshare: A presents, B sees =="
+PRES=$(seat "$A" present.js)
+echo "  $PRES"
+PON=$(echo "$PRES" | jqf presenting)
+[ "$PON" = "True" ] && ok "seat A is presenting" || bad "seat A did not start presenting"
+sleep 3
+shot "$B" presenting-seat-b
+shot "$A" presenting-seat-a
+raw "$A" "globalThis.__pcStopPresenting = true; 'ok'" > /dev/null
+POFF=$(seat "$A" present.js | jqf presenting)
+[ "$POFF" = "False" ] && ok "seat A stopped presenting" || bad "seat A would not stop presenting"
+raw "$A" "globalThis.__pcStopPresenting = false; 'ok'" > /dev/null
+
 echo "== camera loopback: A's HUD seen from B =="
 shot "$A" camera-seat-a
 shot "$B" camera-seat-b
