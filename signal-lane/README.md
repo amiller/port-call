@@ -61,12 +61,12 @@ loopback; reach it over an ssh tunnel.
 
 Four requirements, and only one is a real obstacle:
 
-| | fractal | zed | dstack CVM |
-|---|---|---|---|
-| docker | ✅ | ✅ 24.0.7 | ✅ |
-| `v4l2loopback` for the camera | ✅ loaded | ❌ **module not installed** | ❓ needs a guest-kernel module |
-| two linked seats | ✅ | copy the volumes | copy the volumes |
-| TTS/STT shims reachable | ✅ rig 4 | must run there too | must run there too |
+| | fractal | zed | raw CVM | webhost pod |
+|---|---|---|---|---|
+| docker | ✅ | ✅ 24.0.7 | ✅ | ✅ (one container per project) |
+| `v4l2loopback` for the camera | ✅ loaded | ⚠️ dkms present, **unbuildable** | ✅ via pre-launch script | ⚠️ needs the pod's startup changed |
+| two linked seats | ✅ | copy the volumes | copy the volumes | copy the volumes |
+| TTS/STT shims reachable | ✅ rig 4 | ✅ already running | must ship in the image | must ship in the image |
 
 `SIGNAL_HOST`, `SHIM_HOST`, `TTS_CONTAINER` and `STT_CONTAINER` are all env knobs, so the harness
 itself is not fractal-bound — `SIGNAL_HOST=zed ./e2e.sh` is the whole invocation once the host is
@@ -79,10 +79,22 @@ e2e; it needs this on the target host and nothing else:
 `signal-a-data` / `signal-b-data` volumes can be copied to another host instead of re-scanning two
 QR codes. That is the one piece of this that would otherwise need a human with a phone.
 
-**The camera is the part that does not travel.** zed has no `v4l2loopback` module installed and no
-passwordless sudo, so it needs `apt install v4l2loopback-dkms` plus the sudoers line first. In a
-CVM the module would have to exist in the guest kernel, which is not something a tenant controls —
-so a dstack deployment should expect join/speak/transcribe and no camera until that is settled.
+**The camera travels, but each host earns it differently.**
+
+*zed* is the awkward one. `v4l2loopback-dkms` 0.12.3 is installed but `dkms status` says only
+`added`, never built: the box runs a **mainline** kernel, `5.15.0-051500-generic`, and there is no
+`linux-headers-5.15.0-051500-generic` in apt (`Candidate: (none)`), so DKMS has nothing to build
+against. Fixing it means fetching the matching mainline headers .deb by hand, then
+`dkms install v4l2loopback/0.12.3`, then the sudoers line. Everything else on zed is ready — it
+already runs a full rig (`vexa-poc-{vexa-lite,tts-shim,near-shim,postgres}-1`), so `SHIM_HOST=zed`
+needs no new services.
+
+*A raw CVM* can do it: dstack's **pre-launch script** runs before compose and can configure kernel
+things, so loading v4l2loopback there is a startup-script change rather than an impossibility.
+
+*A webhost pod tenant* inherits whatever the pod's startup does, so the same change has to land in
+the pod rather than in our project — that is a request against dstack-webhost, not something a
+tenant fixes locally.
 
 ## What this cannot prove
 
