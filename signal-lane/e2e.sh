@@ -171,11 +171,33 @@ awk "BEGIN{exit !($CSECS > 3)}"   && ok "capture is $CSECS s long"        || bad
 [ "$CPEAK" -gt 2000 ]             && ok "capture is not silence (peak $CPEAK)" || bad "capture is effectively silent (peak $CPEAK)"
 
 echo "== camera loopback: A's HUD seen from B =="
+shot "$A" camera-seat-a
 shot "$B" camera-seat-b
 FRAME=$(seat "$B" remote-frame.js); echo "  $FRAME"
 STATE=$(echo "$FRAME" | jqf state)
 [ "$STATE" = "drawing" ] && ok "seat B is rendering a non-blank remote video" \
                          || bad "seat B remote video state=$STATE (see $OUT/camera-seat-b.png)"
+
+# "Non-blank" is NOT "our HUD": Chromium's --use-fake-device pattern is non-blank too, and it
+# passed the spread check while both seats showed a green test card. Compare what A is DRAWING
+# against what B is RECEIVING; only agreement means the HUD travelled.
+raw "$A" "globalThis.__pcSigSource='hud'; 'ok'" > /dev/null
+raw "$B" "globalThis.__pcSigSource='remote'; 'ok'" > /dev/null
+seat "$A" frame-signature.js > "$OUT/sig-a-hud.json"
+seat "$B" frame-signature.js > "$OUT/sig-b-remote.json"
+DIST=$(python3 -c "
+import json
+a=json.load(open('$OUT/sig-a-hud.json')); b=json.load(open('$OUT/sig-b-remote.json'))
+if a.get('state')!='ok' or b.get('state')!='ok':
+    print('-1 %s/%s' % (a.get('state'), b.get('state')))
+else:
+    d=sum(abs(x-y) for pa,pb in zip(a['sig'],b['sig']) for x,y in zip(pa,pb))/27.0
+    print('%.1f ok' % d)")
+set -- $DIST; MEANDIFF=$1; SIGSTATE=$2
+echo "  signature mean channel distance A(hud) vs B(remote): $MEANDIFF ($SIGSTATE)"
+awk "BEGIN{exit !($MEANDIFF >= 0 && $MEANDIFF < 60)}" \
+  && ok "what B receives matches what A draws — the HUD travelled" \
+  || bad "B is not showing A's HUD (distance $MEANDIFF; $SIGSTATE) — compare $OUT/camera-seat-a.png and $OUT/camera-seat-b.png"
 
 echo "== transcript =="
 ssh "$HOST" "docker cp /tmp/cap.wav $STT:/tmp/cap.wav" >/dev/null
