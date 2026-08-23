@@ -8,6 +8,7 @@ FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl gnupg xvfb pulseaudio pulseaudio-utils procps socat x11vnc websockify novnc \
+      chromium ffmpeg v4l-utils \
       fonts-liberation libnss3 libasound2 xdg-utils \
  && curl -fsSL https://updates.signal.org/desktop/apt/keys.asc \
       | gpg --dearmor -o /usr/share/keyrings/signal-desktop-keyring.gpg \
@@ -20,8 +21,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Without this every pactl call in the entrypoint dies with "Access denied".
 RUN usermod -aG pulse-access root
 
+# The HUD has to BE a camera, not a canvas: Signal captures call video natively from a device.
+# chromium draws hud.js on its own display and ffmpeg writes that display to /dev/video0.
+COPY hud-cam /opt/hud-cam
+COPY hud-cam.sh /usr/local/bin/hud-cam.sh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/hud-cam.sh
 
 VOLUME /data
 EXPOSE 9334 6080

@@ -45,15 +45,26 @@ websockify --web=/usr/share/novnc 6080 localhost:5900 &
 # the container can reach it. socat republishes it on 9334 for the compose port mapping.
 socat TCP-LISTEN:9334,fork,reuseaddr TCP:127.0.0.1:9333 &
 
-# --use-fake-device-for-media-stream REGISTERS a synthetic camera. Note it is NOT
-# --use-file-for-fake-video-capture=/dev/null, which the Meet rig passes: that one provides no
-# usable videoinput (bot-camera.ts says so), which is why the HUD patches enumerateDevices there.
-# Here the question is whether Signal needs a device to exist BELOW JS for its send path to run. The HUD's enumerateDevices patch advertises one at the JS layer and getUserMedia does
+# Feed the HUD into the loopback camera when the host has one passed through. Absent device ⇒ this
+# seat simply has no camera, which is the honest state rather than a crash: only the speaker seat
+# needs one.
+if [ -e "${HUD_DEVICE:-/dev/video0}" ]; then
+  /usr/local/bin/hud-cam.sh > /tmp/hud-cam.log 2>&1 &
+  echo "hud-cam: feeding ${HUD_DEVICE:-/dev/video0}"
+else
+  echo "hud-cam: no ${HUD_DEVICE:-/dev/video0} — camera disabled for this seat"
+fi
+
+# NO --use-fake-device-for-media-stream any more: it registers a synthetic camera that SHADOWS the
+# real one, and Signal captured it in preference to ours — both seats showed Chromium's green test
+# card while the check happily called it a pass. The camera Signal should find is PortCallCam, the
+# v4l2loopback device hud-cam.sh feeds. --use-fake-ui-for-media-stream stays: it auto-answers the
+# mic/camera prompts, which also removes the separate permissions_popup target on first join. The HUD's enumerateDevices patch advertises one at the JS layer and getUserMedia does
 # hand back the canvas (verified 1280x720), yet the far seat still renders an avatar — so the
 # question is whether Signal's send path needs a device to exist below JS. This is the same flag
 # pair the Meet rig passes (patches/browser-args.ts).
 # --use-fake-ui-for-media-stream auto-answers the mic/camera prompts, which also removes the
 # separate permissions_popup target the harness has to chase on first join.
 exec signal-desktop --no-sandbox --user-data-dir=/data --password-store=basic \
-     --use-fake-device-for-media-stream --use-fake-ui-for-media-stream \
+     --use-fake-ui-for-media-stream \
      --remote-debugging-port=9333 --ozone-platform=x11

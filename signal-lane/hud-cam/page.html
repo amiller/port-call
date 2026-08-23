@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Port Call HUD source</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  video { display: block; width: 100vw; height: 100vh; object-fit: contain; background: #000; }
+</style>
+<video id="v" autoplay muted playsinline></video>
+<script src="hud.js"></script>
+<script>
+  // hud.js installs __vexaCam and exposes its canvas as a MediaStream. The canvas itself is
+  // detached by design, so the only way to put it on a screen ffmpeg can grab is to play the
+  // stream back into a video element. Same HUD the Meet bot draws, same code, no fork.
+  const cam = globalThis.__vexaCam;
+  document.getElementById('v').srcObject = cam.stream;
+  const q = new URLSearchParams(location.search);
+  cam.set(q.get('text') || 'PORT CALL', q.get('sub') || '');
+  // Let the harness change the caption at runtime without reloading: the e2e writes a per-run
+  // nonce here so the frame that reaches the far seat is identifiably from THIS run.
+  globalThis.setHud = (text, sub) => cam.set(text, sub);
+</script>
