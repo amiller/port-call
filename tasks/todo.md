@@ -317,7 +317,13 @@ Three things are called "vexa" here and only the first is the project. Ordered b
       `Account Link` entries, which stay so old transcripts keep resolving.
       The roster keys on the Meet display name; renaming the bot without this makes the next
       `postdoc.py` run roster-block on an unknown speaker. This is the one trap in Phase 2.
-- Cost: near zero, no infra touched. Highest visible value — it is the name participants read.
+- Cost: near zero, no infra touched.
+- **[2026-08-24] These four call sites only affect GUEST joins.** When the signed-in profile is
+  present the join layer skips name entry entirely (`--incognito` stripped, name-entry skipped),
+  so the display name comes from the GOOGLE ACCOUNT. Every calendared meeting therefore still
+  shows "Account Link" — observed live in mtg 157. The remaining step is a Google account
+  display-name change, which is not in this repo. roster.json already lists both names as bots,
+  so nothing roster-blocks either way.
 
 ### Phase 3 — the GitHub repo  (~15 min, one-way-ish)  [DONE 2026-08-22]
 - [x] Rename `amiller/vexa-poc` → `port-call`; `git remote set-url origin`
