@@ -12,6 +12,24 @@ sends derived data across.
 | bot Google account | joining calendared / personal-account meetings, which wall out anonymous participants | a full Chromium profile dir in the container | never — see below |
 | Calendar OAuth | the console's Join list (`push-upcoming.py`) | laptop only; tokens never cross to the rig | per-operator; script currently lives outside this repo |
 
+## Two OAuth clients, and only one is ours
+
+`503335792260-…` is the client behind the calendar, Drive and Slides tokens. **Its project is not
+one Andrew can administer** — `lab-room.py` hit this first with the Meet API and says so in its
+header. Any Google API that has never been enabled there can never be enabled, so anything needing
+a new API must not use it.
+
+`501810722786-…`, in `gen-lang-client-0375995010`, IS his — every service account lives there and
+the Docs API is already on. `lab-room.py` (Meet) and `postdoc.py` (Drive + Docs) both authorise
+against its desktop client at `~/projects/teleport/onboard-elaine/credentials.json`.
+
+Why it matters beyond tidiness: with only the legacy token, editing an existing Doc means export →
+modify → re-upload, which REPLACES the file and destroys every comment on it. `postdoc.py --auth`
+mints `postdoc_token.json` with `drive.file` + `documents`, and `append_section()` then inserts at
+an index instead. Verified: a comment on a doc survives an append. Without that token
+`append_section()` REFUSES rather than falling back, because the fallback silently discards other
+people's comments.
+
 ## The bot's Google account
 
 Anonymous participants are walled out of calendared personal-account meetings behind a Google
