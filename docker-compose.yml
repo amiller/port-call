@@ -58,8 +58,17 @@ services:
       # and the container failed to start on "port is already allocated".
       - "${VEXA_GW_PORT:-8056}:8056"     # gateway (the only front door)
       - "${VEXA_UI_PORT:-3000}:3000"
+      # noVNC onto the bot's own X display. Needed to SEE the browser during provisionLogin — the
+      # Google sign-in is the one step a human has to perform, and it cannot be done blind.
+      - "${VEXA_VNC_PORT:-6080}:6080"
     volumes:
       - recordings:/var/lib/vexa/recordings
+      # The signed-in Google profile. It MUST be a volume. It used to be written straight into the
+      # container filesystem and was silently lost on the next recreate — which is how prod came to
+      # be joining ANONYMOUSLY without anyone noticing, since e2e.sh uses an OPEN lab room where a
+      # guest join succeeds and nothing goes red. Calendared meetings wall out anonymous
+      # participants entirely, so the loss only shows up in a real meeting.
+      - google-session:/var/lib/vexa/google-session-live
       # Hot-swap: edit TS on the host, `./hotswap.sh`, spawn a new bot. ~10s instead of a 5-minute
       # image rebuild + compose restart. Bots are per-meeting processes, so live bots are undisturbed.
       - ./live/services-bot-src:/app/core/meetings/services/bot/src
@@ -85,5 +94,6 @@ services:
     restart: unless-stopped
 
 volumes:
+  google-session:
   pgdata:
   recordings:

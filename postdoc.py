@@ -12,13 +12,35 @@ write token lives here and stays here.
   ./postdoc.py 99 --no-share       create the doc, share it with nobody
   ./postdoc.py 99 --no-share --delete-after      end-to-end test that leaves nothing behind
   ./postdoc.py --poll              every completed meeting in the last day that has no doc yet
+  ./postdoc.py --auth              mint a Drive+Docs token (surgical edits, comments survive)
 """
 import argparse, datetime, json, os, shlex, subprocess, sys
 
 HOST = "fractal"
 PG = "docker exec vexa-rig-postgres-1 psql -U postgres vexa -tAc"
 ARCHIVE = "/media/amiller/fractal-nvme2/vexa-archive"
-TOKEN = "/home/amiller/projects/teleport/planning/scripts/drive_write_token.json"
+# TWO tokens, and which one is live decides whether editing an existing doc is surgical or
+# destructive.
+#
+# The legacy token belongs to OAuth client 503335792260-…, whose PROJECT Andrew has no console
+# access to — the same wall lab-room.py hit with the Meet API. The Docs API can therefore never be
+# enabled for it, so edits have to go export -> modify -> re-upload, which REPLACES the file and
+# would silently destroy any comments people have left.
+#
+# TOKEN_OWN belongs to client 501810722786-… in gen-lang-client-0375995010, which IS his (every
+# service account lives there) and already has the Docs API on. With it, edits are insertions at an
+# index and comments survive. Mint it with:  ./postdoc.py auth
+SCRIPTS = "/home/amiller/projects/teleport/planning/scripts"
+TOKEN_OWN = f"{SCRIPTS}/postdoc_token.json"
+TOKEN_LEGACY = f"{SCRIPTS}/drive_write_token.json"
+TOKEN = TOKEN_OWN if os.path.exists(TOKEN_OWN) else TOKEN_LEGACY
+# The desktop client Andrew controls, with a localhost redirect. Same one lab-room.py authorises
+# against; override if that ever moves.
+CLIENT_SECRETS = os.environ.get(
+    "POSTDOC_CLIENT_SECRETS",
+    os.path.expanduser("~/projects/teleport/onboard-elaine/credentials.json"))
+SCOPES = ["https://www.googleapis.com/auth/drive.file",
+          "https://www.googleapis.com/auth/documents"]
 MIN_SEGMENTS = 100
 # Notes engine. "near" keeps the whole pipeline on NEAR inference — the same provider and the same
 # key already doing the transcription — which is what makes a pod/CVM deployment possible at all:
@@ -149,14 +171,58 @@ def utc(epoch):
     return datetime.datetime.fromtimestamp(epoch, datetime.timezone.utc)
 
 
-def drive():
+def auth():
+    """Mint a Drive+Docs token against the client Andrew actually controls.  ./postdoc.py auth"""
+    from google_auth_oauthlib.flow import InstalledAppFlow
+    # Unbuffered: when stdout is not a tty Python buffers it, and run_local_server's "visit this
+    # URL" line never reaches the log — the flow then waits forever on a URL nobody saw.
+    sys.stdout.reconfigure(line_buffering=True)
+    flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS, SCOPES)
+    creds = flow.run_local_server(port=int(os.environ.get("POSTDOC_AUTH_PORT", "8767")),
+                                  prompt="consent", access_type="offline", open_browser=False,
+                                  authorization_prompt_message="Open this URL and approve:\n\n{url}\n")
+    open(TOKEN_OWN, "w").write(creds.to_json())
+    print(f"wrote {TOKEN_OWN}\n  scopes: {' '.join(SCOPES)}")
+    print("  edits to existing docs are now surgical; comments survive")
+
+
+def _creds():
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
-    from googleapiclient.discovery import build
     creds = Credentials.from_authorized_user_file(TOKEN)
     if creds.expired:
         creds.refresh(Request())
-    return build("drive", "v3", credentials=creds)
+    return creds
+
+
+def drive():
+    from googleapiclient.discovery import build
+    return build("drive", "v3", credentials=_creds())
+
+
+def can_edit_surgically():
+    """True when the live token can reach the Docs API. Decides insert-vs-rewrite, and the caller
+    must not guess: a rewrite on a doc with comments destroys them."""
+    return TOKEN == TOKEN_OWN
+
+
+def append_section(doc_id, markdown):
+    """Insert text at the end of an existing doc WITHOUT rewriting it.
+
+    Falls back to nothing: if the Docs API is not reachable this raises, because the alternative
+    (export, edit, re-upload) silently discards every comment on the document and the caller
+    deserves to decide that rather than have it happen."""
+    from googleapiclient.discovery import build
+    if not can_edit_surgically():
+        raise SystemExit(
+            "refusing to edit: only the legacy token is present, and its project cannot enable the\n"
+            "Docs API, so the only edit path would REPLACE the file and destroy any comments.\n"
+            "Run  ./postdoc.py auth  to mint a token that can insert instead.")
+    docs = build("docs", "v1", credentials=_creds())
+    end = docs.documents().get(documentId=doc_id).execute()["body"]["content"][-1]["endIndex"] - 1
+    docs.documents().batchUpdate(documentId=doc_id, body={"requests": [
+        {"insertText": {"location": {"index": end}, "text": markdown}}]}).execute()
+    return end
 
 
 def existing_doc(svc, mid):
@@ -352,6 +418,8 @@ def run(mid, args):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("meeting_id", nargs="?", type=int)
+    p.add_argument("--auth", action="store_true",
+                   help="mint a Drive+Docs token against the client Andrew controls, then exit")
     p.add_argument("--poll", action="store_true")
     p.add_argument("--since", type=int, default=24, help="hours, with --poll")
     p.add_argument("--dry-run", action="store_true")
@@ -378,7 +446,9 @@ def main():
                    help="extra line for the transcript caveat, repeatable")
     args = p.parse_args()
 
-    if args.poll:
+    if args.auth:
+        auth()
+    elif args.poll:
         ids = sql(f"select m.id from meetings m where m.status='completed' "
                   f"and m.end_time > now() - interval '{args.since} hours' "
                   f"and (select count(*) from transcriptions where meeting_id=m.id) "

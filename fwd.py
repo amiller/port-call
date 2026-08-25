@@ -6,10 +6,14 @@ re-sends everything if the pod's in-memory room expires or the app restarts.
 """
 import json, subprocess, sys, time, urllib.request
 
-CODE, MID = sys.argv[1], int(sys.argv[2])
+# MID accepts a COMMA-SEPARATED list. A host reboot kills the bot and the next join gets a NEW
+# meeting row, so a single id would make the shared page drop everything said before the restart —
+# the first post is `replace: True`. Passing "157,160" keeps one continuous transcript across it.
+CODE, MID = sys.argv[1], sys.argv[2]
+MIDS = ",".join(str(int(m)) for m in MID.split(","))
 BASE = "https://pod.dstack.soc1024.com/meeting-brainrot"
 SQL = (f"select coalesce(speaker,'?'), replace(text, chr(10), ' ') "
-       f"from transcriptions where meeting_id={MID} order by start_time, id")
+       f"from transcriptions where meeting_id in ({MIDS}) order by start_time, id")
 
 def fetch():
     out = subprocess.run(["docker", "exec", "vexa-rig-postgres-1", "psql", "-U", "postgres",

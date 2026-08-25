@@ -79,15 +79,28 @@ services:
     restart: unless-stopped
 
   vexa-lite:
-    image: ghcr.io/amiller/port-call-lite:e7bcf85
+    image: ghcr.io/amiller/port-call-lite:console1
     shm_size: 2gb
     depends_on:
       postgres: {condition: service_healthy}
     ports:
       - "8056:8056"
       - "3000:3000"
+      # admin-api. It ALREADY binds 0.0.0.0:8001 (HOST defaults to 0.0.0.0 in
+      # admin_api/__main__.py); the rig simply never published it, which is why relaunch.sh mints
+      # tokens through `docker exec`. A CVM or a pod tenant has no exec, so without this nothing
+      # can mint a bot token and POST /bots is unreachable however healthy the gateway looks.
+      #
+      # Published, the dstack gateway serves it at <app-id>-8001.<base-domain>, guarded by
+      # X-Admin-API-Key: ADMIN_TOKEN. That token is then the entire perimeter for creating users
+      # and minting tokens — use a strong one, never the rig's dev value.
+      - "8001:8001"
     volumes:
       - recordings:/var/lib/vexa/recordings
+      # Same reasoning as the rig compose: a signed-in profile only survives on a volume. Populate
+      # it with `phala cp` (SSH into a CVM works: <app-id>-22.<base-domain> on :443) — without it
+      # the bot joins anonymously and only OPEN rooms work.
+      - google-session:/var/lib/vexa/google-session-live
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"
@@ -103,5 +116,6 @@ services:
     restart: unless-stopped
 
 volumes:
+  google-session:
   pgdata:
   recordings:
