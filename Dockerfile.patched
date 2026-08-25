@@ -99,5 +99,6 @@ RUN cd /app/core/meetings/services/bot && /app/node_modules/.bin/tsc \
 #    unreachable.
 COPY patches/gateway-app.py /app/gateway/src/gateway/app.py
 RUN grep -q "_forward_admin" /app/gateway/src/gateway/app.py \
+ && grep -q "CONSOLE_HTML" /app/gateway/src/gateway/app.py \
  && /opt/venvs/gateway/bin/python -c "import ast,sys; ast.parse(open('/app/gateway/src/gateway/app.py').read())" \
  || (echo "gateway admin passthrough missing or unparseable" && exit 1)

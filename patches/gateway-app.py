@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Set, Tuple
 import httpx  # the downstream adapter's transport errors are mapped to 502/504 (not leaked as a 500)
 
 from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from .obs import TRACE_HEADER, TraceMiddleware, get_trace_id, log_event, set_user_id
 from .ports import Authorizer, DownstreamClient, RedisBus
@@ -58,6 +58,132 @@ _DEFAULT_MEETING_API_URL = "http://meeting-api"
 _DEFAULT_AGENT_API_URL = "http://agent-api"
 # The identity control plane (admin-api): the self-serve /user/webhook config lives there
 # (writes to user.data JSONB — the same blob /internal/validate reads the webhook config from).
+CONSOLE_HTML = """<!doctype html>
+<meta charset=utf-8><title>Port Call</title>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#12151a;--fg:#e6eaef;--dim:#8b95a1;--line:#262d36;--card:#181d24;--ok:#5fbe90;--no:#e4715d;--go:#6ba6e4}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 ui-sans-serif,system-ui,sans-serif;padding:0 1rem 4rem}
+.wrap{max-width:52rem;margin:0 auto}
+h1{font-size:1.2rem;letter-spacing:.02em;margin:1.6rem 0 .2rem}
+.sub{color:var(--dim);font-size:.85rem;margin-bottom:1.4rem}
+input,button{font:inherit;border-radius:4px;border:1px solid var(--line);background:var(--card);color:var(--fg);padding:.5rem .7rem}
+input{width:100%}
+button{cursor:pointer;border-color:#33404f}
+button:hover{border-color:var(--go)}
+button.go{background:var(--go);color:#0b1016;border-color:var(--go);font-weight:600}
+button.stop{color:var(--no);border-color:#4a2f2c}
+.row{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
+.card{background:var(--card);border:1px solid var(--line);border-radius:5px;padding:.9rem 1rem;margin-bottom:.7rem}
+.mt{margin-top:1.6rem}
+table{width:100%;border-collapse:collapse;font-size:.92rem}
+td{padding:.5rem .6rem .5rem 0;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+.pill{font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;padding:.12rem .45rem;border-radius:3px;font-weight:600}
+.pill.active{color:var(--ok);background:#16302479}
+.pill.wait{color:#e0a055;background:#33240f}
+.pill.done{color:var(--dim);background:#20262e}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.85rem}
+#log{white-space:pre-wrap;max-height:22rem;overflow:auto;background:#0d1116;border:1px solid var(--line);border-radius:4px;padding:.8rem;font-family:ui-monospace,monospace;font-size:.83rem;line-height:1.5}
+.err{color:var(--no);font-size:.85rem;margin-top:.5rem;min-height:1.2em}
+.hint{color:var(--dim);font-size:.8rem}
+</style>
+<div class=wrap>
+<h1>Port Call</h1>
+<div class=sub>Your bot. Your meetings. Your transcripts.</div>
+
+<div class=card>
+  <div class=row>
+    <input id=tok type=password placeholder="Your API token" style="flex:1;min-width:16rem">
+    <button class=go onclick=savetok()>Use</button>
+    <button onclick=forget()>Forget</button>
+  </div>
+  <div class=hint style="margin-top:.5rem">Stored in this browser only. A <b>bot</b> token can start and stop meetings; a <b>tx</b> token reads transcripts.</div>
+  <div class=err id=toke></div>
+</div>
+
+<div class=card>
+  <div class=row>
+    <input id=code placeholder="Meet code, e.g. abc-defg-hij" style="flex:1;min-width:14rem">
+    <input id=name placeholder="Bot name (optional)" style="width:12rem;flex:0 0 auto">
+    <button class=go onclick=join()>Send bot</button>
+  </div>
+  <div class=err id=joine></div>
+</div>
+
+<div class=mt><b>Meetings</b> <span class=hint id=refreshed></span></div>
+<div class=card><table id=list><tr><td class=hint>—</td></tr></table></div>
+
+<div class=mt><b>Transcript</b> <span class=hint id=which></span></div>
+<div class=card><div id=log class=hint>Pick a meeting above.</div></div>
+</div>
+
+<script>
+const $=i=>document.getElementById(i);
+let TOK=localStorage.getItem('pc_tok')||'', SEL=null, SELP=null;
+if(TOK) $('tok').value=TOK;
+function savetok(){TOK=$('tok').value.trim();localStorage.setItem('pc_tok',TOK);$('toke').textContent='';refresh();}
+function forget(){TOK='';localStorage.removeItem('pc_tok');$('tok').value='';$('list').innerHTML='<tr><td class=hint>—</td></tr>';}
+async function api(path,opts={}){
+  if(!TOK){throw new Error('No token yet — paste yours above.')}
+  const r=await fetch(path,{...opts,headers:{'X-API-Key':TOK,'Content-Type':'application/json',...(opts.headers||{})}});
+  const t=await r.text();
+  let b; try{b=JSON.parse(t)}catch(e){b=t}
+  if(!r.ok){
+    // Surface the API's own words. A 403 here means the token's scope is wrong, and saying so is
+    // more useful than a generic failure — it is the difference between "broken" and "wrong key".
+    throw new Error((b&&b.detail)?`${r.status} ${b.detail}`:`${r.status}`);
+  }
+  return b;
+}
+async function join(){
+  $('joine').textContent='';
+  const code=$('code').value.trim();
+  if(!code){$('joine').textContent='Needs a meeting code.';return}
+  try{
+    await api('/bots',{method:'POST',body:JSON.stringify({platform:'google_meet',
+      native_meeting_id:code,bot_name:($('name').value.trim()||'Port Call'),voice_agent_enabled:true})});
+    $('code').value='';refresh();
+  }catch(e){$('joine').textContent=e.message}
+}
+async function stop(p,c){try{await api(`/bots/${p}/${c}`,{method:'DELETE'});refresh()}catch(e){$('joine').textContent=e.message}}
+function pill(s){const k=s==='active'?'active':(s==='completed'||s==='failed')?'done':'wait';return `<span class="pill ${k}">${s}</span>`}
+async function refresh(){
+  if(!TOK)return;
+  try{
+    const d=await api('/bots');
+    const ms=(d.meetings||[]);
+    $('refreshed').textContent=`· ${new Date().toLocaleTimeString()}`;
+    $('list').innerHTML = ms.length? ms.map(m=>`<tr>
+      <td class=mono>${m.native_meeting_id}</td>
+      <td>${pill(m.status)}</td>
+      <td class=hint>${m.start_time?new Date(m.start_time+'Z').toLocaleTimeString():''}</td>
+      <td style="text-align:right">
+        <button onclick="pick('${m.platform}','${m.native_meeting_id}')">Transcript</button>
+        ${m.status==='active'||m.status==='awaiting_admission'?`<button class=stop onclick="stop('${m.platform}','${m.native_meeting_id}')">Stop</button>`:''}
+      </td></tr>`).join('') : '<tr><td class=hint>No meetings yet. Send the bot to one above.</td></tr>';
+    $('toke').textContent='';
+  }catch(e){$('toke').textContent=e.message}
+}
+async function pick(p,c){SEL=c;SELP=p;$('which').textContent=`· ${c}`;await draw()}
+async function draw(){
+  if(!SEL)return;
+  try{
+    const d=await api(`/transcripts/${SELP}/${SEL}`);
+    const segs=d.segments||[];
+    $('log').textContent = segs.length? segs.map(s=>`${s.speaker||'?'}: ${s.text}`).join('\n')
+                                      : 'No transcript yet — it fills in as people talk.';
+  }catch(e){
+    // The commonest case by far: a bot-scoped token asking for transcripts.
+    $('log').textContent = e.message.includes('scope')
+      ? e.message+'\n\nTranscripts need your tx token. Paste that one above to read them.' : e.message;
+  }
+}
+setInterval(refresh,5000); setInterval(draw,5000); refresh();
+</script>
+"""
+
 _DEFAULT_ADMIN_API_URL = "http://admin-api"
 
 
@@ -408,6 +534,19 @@ def create_app(
             return JSONResponse({"detail": "admin-api unreachable"}, status_code=502)
         return Response(content=resp.content, status_code=resp.status_code,
                         media_type=resp.headers.get("content-type"))
+
+    # ---- TENANT CONSOLE. The single public port makes this the only place it can live. ----
+    # board.py is single-tenant: it holds the rig's own tokens and shows Andrew's calendar, so a
+    # tenant cannot be handed it. This page holds NOTHING. It is static HTML; the browser talks to
+    # the same gateway routes with the tenant's own X-API-Key, so scoping is the API's existing
+    # scope check rather than anything invented here — a bot token still gets 403 on transcripts,
+    # which is the behaviour we want a tenant to SEE rather than be protected from.
+    #
+    # No session, no cookie, no per-tenant secret on our side: the token lives in the tenant's
+    # localStorage and is theirs to revoke.
+    @app.get("/console", response_class=HTMLResponse)
+    async def tenant_console():
+        return CONSOLE_HTML
 
     @app.post("/admin/users", status_code=201)
     async def admin_create_user(request: Request):

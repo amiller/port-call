@@ -79,7 +79,7 @@ services:
     restart: unless-stopped
 
   vexa-lite:
-    image: ghcr.io/amiller/port-call-lite:admin1
+    image: ghcr.io/amiller/port-call-lite:console1
     shm_size: 2gb
     depends_on:
       postgres: {condition: service_healthy}
