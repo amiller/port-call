@@ -67,28 +67,34 @@ def main():
     # any server, and stores them in the reader's own browser. The alternative — a doc full of
     # YOUR-INSTANCE placeholders — makes the SENDER do find-and-replace before every invite, which
     # is work we invented and then handed to the person doing the favour.
+    # ONE link that lands them in a working console. Not a document with values to paste: the
+    # token rides in the fragment, which browsers never send to a server, and the console stores it
+    # and scrubs the address bar. Nothing for either side to copy.
     import urllib.parse as _u
-    host = base.replace("https://", "").replace("http://", "").rstrip("/")
-    frag = _u.urlencode({"i": host, "b": tokens["bot"], "t": tokens["tx"]})
+    console = f"{base}/console#t={_u.quote(tokens['bot'])}"
     print(f"""
-Send them this ONE link. It fills the handbook in for them — instance, tokens, every command
-ready to copy — and nothing in it reaches a server:
+Send them this. It opens their console, already signed in:
 
-  {HANDBOOK}#{frag}
+  {console}
 
-Or, if you would rather hand over the raw values:
+Reading transcripts needs the other token, and the console takes it the same way:
+
+  {base}/console#t={_u.quote(tokens['tx'])}
+
+Background, if they want it — the handbook explains what the bot can and cannot do:
+
+  {HANDBOOK}#{_u.urlencode({"i": base.replace("https://", "").replace("http://", "").rstrip("/")})}
+
+Raw values, if you would rather hand them over some other way:
 
   PORT_CALL_URL={base}
-  PORT_CALL_BOT_TOKEN={tokens['bot']}     # spawn and drive bots
-  PORT_CALL_TX_TOKEN={tokens['tx']}      # read transcripts
-
-  console: {base}/console
+  PORT_CALL_BOT_TOKEN={tokens['bot']}
+  PORT_CALL_TX_TOKEN={tokens['tx']}
 
 The bot joins meetings under THIS instance's own Google identity, not theirs — see #64. Tell them
 that before they invite it to anything, not after.
 
-The link carries their tokens in its fragment, so treat it like the tokens themselves: fine in a
-DM, not fine in a channel that logs URLs.""")
+These links carry a token, so treat them like one: fine in a DM, not in a channel that logs URLs.""")
 
 if __name__ == "__main__":
     main()

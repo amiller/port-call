@@ -32,7 +32,7 @@ from typing import Dict, List, Optional, Set, Tuple
 import httpx  # the downstream adapter's transport errors are mapped to 502/504 (not leaked as a 500)
 
 from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, StreamingResponse
 
 from .obs import TRACE_HEADER, TraceMiddleware, get_trace_id, log_event, set_user_id
 from .ports import Authorizer, DownstreamClient, RedisBus
@@ -58,6 +58,82 @@ _DEFAULT_MEETING_API_URL = "http://meeting-api"
 _DEFAULT_AGENT_API_URL = "http://agent-api"
 # The identity control plane (admin-api): the self-serve /user/webhook config lives there
 # (writes to user.data JSONB — the same blob /internal/validate reads the webhook config from).
+# An instance describes itself to an agent, in the format agents already look for. Handing someone
+# a URL should be enough: their assistant fetches /llms.txt, learns the auth, the endpoints and the
+# live stream, and can drive the whole thing without anyone pasting curl into a chat window.
+# Deliberately unauthenticated — it is a manual, not data. It names no tokens and no meetings.
+LLMS_TXT = """# Port Call
+
+A meeting bot you control over HTTP. Send it into a Google Meet, it transcribes with speaker
+attribution, you read the transcript live or afterwards.
+
+## Auth
+
+Every call takes a header: `X-API-Key: <token>`. Tokens are per-account and scoped.
+
+- a `bot` token can start, list and stop meetings
+- a `tx` token can read transcripts
+
+Using the wrong one returns `403 {"detail": "Insufficient scope for this endpoint"}`. That is the
+scope check, not an error to retry.
+
+## Send the bot into a meeting
+
+    POST /bots
+    {"platform": "google_meet", "native_meeting_id": "abc-defg-hij", "bot_name": "optional"}
+
+`native_meeting_id` is the code from the Meet URL: `meet.google.com/abc-defg-hij` -> `abc-defg-hij`.
+Returns 201 with an `id`. Status moves `requested` -> `joining` -> `active`. A room that admits
+people manually shows `awaiting_admission` until a human lets the bot in.
+
+## See what is running
+
+    GET /bots        -> {"meetings": [{id, platform, native_meeting_id, status, start_time}]}
+
+## Read the transcript
+
+    GET /transcripts/{platform}/{native_meeting_id}     (needs a tx token)
+
+Returns the meeting plus `segments`, each with `speaker`, `text` and timing. Safe to poll; it also
+works after the meeting ends.
+
+## Follow a meeting live
+
+Prefer this over polling. WebSocket `/ws`, key in the `x-api-key` header or an `api_key` query
+parameter:
+
+    -> {"action": "subscribe",
+        "meetings": [{"platform": "google_meet", "native_id": "abc-defg-hij"}]}
+    <- {"type": "subscribed", ...}
+
+Note the key is `native_id` here, NOT the `native_meeting_id` every REST route uses, and the entry
+is an object rather than a meeting id. Sending ids gets
+`{"error": "invalid_subscribe_payload", "details": "no valid meeting objects"}`.
+
+The socket then carries transcript updates, bot status changes and meeting chat as they happen.
+`{"action":"ping"}` gets a `pong`; `{"action":"unsubscribe","meetings":[id]}` stops the flow.
+
+## Send the bot home
+
+    DELETE /bots/{platform}/{native_meeting_id}
+
+It does not leave on its own.
+
+## Limits worth knowing before relying on it
+
+- The bot joins under THIS INSTANCE'S OWN Google identity, not the caller's. Participants see that
+  name and avatar.
+- Rooms that require a signed-in Google account may refuse an anonymous join outright — a sign-in
+  wall rather than a knock. A join that sits at `joining` and never reaches `active` is usually
+  this.
+- Transcripts are stored on this instance, readable by whoever operates it.
+- Accounts have a concurrent-bot cap; exceeding it fails the spawn rather than queueing.
+
+## For a person
+
+`/console` is a browser UI for all of the above.
+"""
+
 CONSOLE_HTML = """<!doctype html>
 <meta charset=utf-8><title>Port Call</title>
 <meta name=viewport content="width=device-width,initial-scale=1">
@@ -93,15 +169,16 @@ tr:last-child td{border-bottom:0}
 <h1>Port Call</h1>
 <div class=sub>Your bot. Your meetings. Your transcripts.</div>
 
-<div class=card>
-  <div class=row>
+<details id=setup class=card>
+  <summary class=hint style="cursor:pointer">Token</summary>
+  <div class=row style="margin-top:.7rem">
     <input id=tok type=password placeholder="Your API token" style="flex:1;min-width:16rem">
     <button class=go onclick=savetok()>Use</button>
     <button onclick=forget()>Forget</button>
   </div>
   <div class=hint style="margin-top:.5rem">Stored in this browser only. A <b>bot</b> token can start and stop meetings; a <b>tx</b> token reads transcripts.</div>
-  <div class=err id=toke></div>
-</div>
+</details>
+<div class=err id=toke></div>
 
 <div class=card>
   <div class=row>
@@ -122,6 +199,15 @@ tr:last-child td{border-bottom:0}
 <script>
 const $=i=>document.getElementById(i);
 let TOK=localStorage.getItem('pc_tok')||'', SEL=null, SELP=null;
+// The token can arrive IN THE LINK (#t=…). A fragment is never sent to a server, so the invite can
+// carry it end to end without it touching ours — and the tenant then has nothing to paste, which
+// was the whole complaint about handing someone a token and a document.
+(function(){
+  const h=new URLSearchParams(location.hash.slice(1));
+  const t=h.get('t')||h.get('token');
+  if(t){TOK=t;localStorage.setItem('pc_tok',TOK);
+        history.replaceState(null,'',location.pathname+location.search);}
+})();
 if(TOK) $('tok').value=TOK;
 function savetok(){TOK=$('tok').value.trim();localStorage.setItem('pc_tok',TOK);$('toke').textContent='';refresh();}
 function forget(){TOK='';localStorage.removeItem('pc_tok');$('tok').value='';$('list').innerHTML='<tr><td class=hint>—</td></tr>';}
@@ -180,6 +266,9 @@ async function draw(){
       ? e.message+'\n\nTranscripts need your tx token. Paste that one above to read them.' : e.message;
   }
 }
+// Open the token drawer only when there is nothing to work with; a tenant who arrived by link
+// should see their meetings, not a form.
+if(!TOK) $('setup').open=true;
 setInterval(refresh,5000); setInterval(draw,5000); refresh();
 </script>
 """
@@ -544,6 +633,13 @@ def create_app(
     #
     # No session, no cookie, no per-tenant secret on our side: the token lives in the tenant's
     # localStorage and is theirs to revoke.
+    # Served at BOTH paths: /llms.txt is the convention agents probe for, and /agent.txt is what a
+    # person guesses. Same body — a manual should not depend on knowing its filename.
+    @app.get("/llms.txt", response_class=PlainTextResponse)
+    @app.get("/agent.txt", response_class=PlainTextResponse)
+    async def llms_txt():
+        return LLMS_TXT
+
     @app.get("/console", response_class=HTMLResponse)
     async def tenant_console():
         return CONSOLE_HTML
