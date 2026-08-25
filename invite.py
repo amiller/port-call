@@ -18,6 +18,11 @@ minting here means oauth3 sits IN FRONT of a working model rather than replacing
 """
 import json, os, sys, urllib.request, urllib.error
 
+# The published handbook. Override if it moves.
+HANDBOOK = os.environ.get(
+    "PORT_CALL_HANDBOOK",
+    "https://claude.ai/code/artifact/61165100-d6c0-4dd3-81cc-f07134f7c60c")
+
 def call(method, url, token, body=None):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method,
@@ -58,17 +63,32 @@ def main():
         _, t = call("POST", f"{base}/admin/users/{uid}/tokens?scope={scope}", tok)
         tokens[scope] = t["token"]
 
+    # One link, nothing to edit. The handbook reads these from the fragment, which is never sent to
+    # any server, and stores them in the reader's own browser. The alternative — a doc full of
+    # YOUR-INSTANCE placeholders — makes the SENDER do find-and-replace before every invite, which
+    # is work we invented and then handed to the person doing the favour.
+    import urllib.parse as _u
+    host = base.replace("https://", "").replace("http://", "").rstrip("/")
+    frag = _u.urlencode({"i": host, "b": tokens["bot"], "t": tokens["tx"]})
     print(f"""
-Hand this to the tenant — it is everything they need and nothing of ours:
+Send them this ONE link. It fills the handbook in for them — instance, tokens, every command
+ready to copy — and nothing in it reaches a server:
+
+  {HANDBOOK}#{frag}
+
+Or, if you would rather hand over the raw values:
 
   PORT_CALL_URL={base}
   PORT_CALL_BOT_TOKEN={tokens['bot']}     # spawn and drive bots
   PORT_CALL_TX_TOKEN={tokens['tx']}      # read transcripts
 
-  curl -H "X-API-Key: $PORT_CALL_BOT_TOKEN" {base}/bots
+  console: {base}/console
 
 The bot joins meetings under THIS instance's own Google identity, not theirs — see #64. Tell them
-that before they invite it to anything, not after.""")
+that before they invite it to anything, not after.
+
+The link carries their tokens in its fragment, so treat it like the tokens themselves: fine in a
+DM, not fine in a channel that logs URLs.""")
 
 if __name__ == "__main__":
     main()
