@@ -58,6 +58,9 @@ services:
       # and the container failed to start on "port is already allocated".
       - "${VEXA_GW_PORT:-8056}:8056"     # gateway (the only front door)
       - "${VEXA_UI_PORT:-3000}:3000"
+      # noVNC onto the bot's own X display. Needed to SEE the browser during provisionLogin — the
+      # Google sign-in is the one step a human has to perform, and it cannot be done blind.
+      - "${VEXA_VNC_PORT:-6080}:6080"
     volumes:
       - recordings:/var/lib/vexa/recordings
       # The signed-in Google profile. It MUST be a volume. It used to be written straight into the
