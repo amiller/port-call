@@ -95,6 +95,17 @@ services:
       # X-Admin-API-Key: ADMIN_TOKEN. That token is then the entire perimeter for creating users
       # and minting tokens — use a strong one, never the rig's dev value.
       - "8001:8001"
+      # noVNC onto the bot's own X display (x11vnc + websockify already run in the image). The rigs
+      # publish this because the Google sign-in is the one step a human must do and it cannot be
+      # done blind — and on a CVM it is also the only way to SEE a join fail, since there is no
+      # docker exec and `phala cvms logs` returns a short, shifting window.
+      #
+      # READ THIS BEFORE LEAVING IT UP: x11vnc runs -nopw, and the dstack gateway puts this on the
+      # public internet at <app-id>-6080.<base-domain>. Anyone who learns the app id — it is in the
+      # dashboard and in the attestation — gets the bot's desktop, including whatever Google
+      # session is signed into it. Publish it to provision or to debug, then take it back out and
+      # redeploy. It is not a permanent port.
+      - "6080:6080"
     volumes:
       - recordings:/var/lib/vexa/recordings
       # Same reasoning as the rig compose: a signed-in profile only survives on a volume. Populate

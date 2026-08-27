@@ -130,6 +130,39 @@ found, cleared by hand:
 - [ ] Free-tier Meet caps 3+ participant calls at 60 min — the bot should surface "call ending soon"
       (it's already in selfcheck's buttons dump) rather than dying silently with the room.
 
+## 2026-08-25 camera contact sheet (#57, #60) and the four backgrounds — done, bench GREEN
+
+Shipped: skin-bench emits per-state contact sheets (full canvas + the ~560px band Meet crops to,
+boxed side by side) plus individual frames, gated on --shots so bench.sh stays fast; `avatar:'none'`
+is a real registry entry (#60); brainrot and vitals both relaid out inside SAFE. Verified on RIG=4,
+full `./bench.sh` GREEN. RIG=1 still runs the OLD camera and has NOT been synced.
+
+What the sheet found, and what each turned out to be:
+
+- [x] vitals was HALF INVISIBLE — cells at x=70/340/700/1010 and a bar to x=1200 against a 560px
+      band, so SEGMENTS, UPTIME, SPEAKER and most of the bar never reached a screen. Relaid out as
+      a 2x2 + speaker + bar, all inside SAFE and all ABOVE the character. Real bug, long-standing.
+- [x] brainrot words were outside SAFE (drawn, published, never seen). Clamping them in put them
+      across the avatar's FACE; three-per-row then collided with each other. Final: six words, two
+      lanes, each shrunk to fit its lane, all above the character.
+- [x] transcript's history strip was rgba(76,76,102) on near-black — not a crop bug, just too dim
+      to read. Lifted to rgba(146,146,178).
+- [x] ~~swarm is near-empty, rebuild or retire~~ **WRONG — I was reading a stale sheet.** swarm
+      already respects SAFE and decays a word over ~30s; the sweep fed once and then walked 20
+      combinations, so the field had faded before the capture. vitals showed the same tell (SINCE
+      LAST climbing 10.4s -> 13.1s across the sheet). The BENCH was lying, not the background.
+      Fixed by re-feeding a fixed corpus before every cell — the only way cells compare at all.
+      Lesson: a contact sheet of a signal-driven surface must re-establish the signal per cell.
+
+Still open, smaller:
+
+- [ ] swarm words collide in the upper band (meeting/agents/facilitator overlap). The field orbits
+      but has no separation term.
+- [ ] rooster is still the default and is the weakest of the four; hancock reads best at tile size.
+      A default is an identity decision, so it wants Andrew's call, not a commit.
+- [ ] Caption modes (off / headline-only / full) from Albiona's m67 feedback are STILL not
+      implemented — 12 days. Now cheap to judge, because the sheet can show all three.
+
 ## 2026-08-13 feedback-derived items (mined from 08-12 transcripts, meetings 67-76)
 
 Reception verdict: amused, not impressed — entertainment value currently comes from failure modes.
@@ -350,3 +383,73 @@ persists recordings to a volume, and even then the value is low: these strings a
 
 ### Never rename
 `vexaai/vexa-lite`, `@vexa/join` — upstream software, and what `docker pull` resolves.
+
+## 2026-08-27 the daily rung — the project now runs itself once a day
+
+Asked whether anything periodically proves the rig still works, the answer was no: `docs/swarm.md`
+says outright there is no standing autonomous process, and fractal's crontab confirmed it. The only
+two Port Call lines were `backup.sh` at 04:15 and `@reboot relaunch.sh` on rig 1. The gate fires
+only when an agent promotes a branch, and nobody had promoted since `b6d11b6` — so a rig that died
+in the night stayed silent until someone tried to take a meeting on it.
+
+`daily.sh` closes that. 05:00, on rig 4, from cron:
+
+    0 5 * * * cd /home/amiller/vexa-rig4 && ./daily.sh >> /tmp/vexa-daily.log 2>&1
+
+It runs `bench.sh` and then `RECORD=1 e2e.sh`, and keeps everything under
+`$ARCHIVE/daily/<stamp>/`: both logs verbatim, and the e2e evidence — an mp4 of the bot's own X
+display for the whole run, a screenshot after every surface act, and `report.html`. One line per
+run goes to `ledger.tsv`, and `index.html` is regenerated from that ledger every time, so the
+summary can never disagree with the runs it lists.
+
+First run, done by hand before the cron was installed: **bench GREEN, e2e 10 passed 0 failed**,
+5 screenshots + an 800KB mp4 on disk. `camera.png` shows the rooster HUD live in the meeting.
+
+- `e2e.sh`: `ART` is now overridable (`ART=${ART:-$RIGDIR/artifacts/$STAMP}`) so a scheduled runner
+  can direct the evidence somewhere it keeps the rest of it, instead of filling a per-rig directory
+  nothing prunes. 21-day retention, matching `backup.sh`.
+- `board.py` serves it: **http://192.168.100.4:8090/daily**, linked from the console header. The
+  path is joined then prefix-checked, so a `../` in the URL cannot climb out of the archive.
+- Rig 4 got the `@reboot relaunch.sh` line rig 1 has had since 08-18 (`sleep 120`, so rig 1 mints
+  its tokens and owns `board.py` first). Without it the first reboot would have left the daily rung
+  reporting RED-no-token forever, which is the failure mode the rung exists to catch.
+
+Known and deliberate: a red run is recorded red and `daily.sh` exits non-zero. Nothing retries,
+nothing masks. `docker compose up -d` inside `relaunch.sh` still recreates containers if the compose
+drifted, which destroys in-container recordings (#26) — that trap now applies to rig 4's reboot path
+too, and is one more reason to finish #26.
+
+- [ ] Notify on RED. Right now the evidence is pull-only: it is on the console and in the ledger,
+      and nobody is told. A red line should reach Andrew without him going to look.
+- [ ] The daily rung proves *staging*. Prod (rig 1) is still only proven by Andrew using it.
+
+## 2026-08-27 hosted instance: what a CVM can and cannot be tested on
+
+`port-call-demo2` (app `47fa4ee3…`, prod7) is the only Port Call CVM still running. The gateway is
+genuinely alive — `/docs` 200, the admin passthrough works, `invite.py` provisioned a tenant and
+minted both tokens against it. But a bot spawned into the open lab room never joined:
+
+    status failed · failure_stage joining · completion_reason join_failure
+    "workload destroyed before the bot reported (never started)"   (the 5-minute timeout)
+
+The bot workload never reported at all, which is upstream of the profile question — a guest join
+into an OPEN room is exactly what e2e does on the rigs every day. Diagnosing it from outside is the
+problem: a CVM gives no `docker exec`, and `phala cvms logs` returns a short shifting window (~445
+lines) that had already rolled past the spawn by the time it was queried.
+
+So `docker-compose.cvm.yml` now publishes `6080:6080` — x11vnc and websockify already run inside
+the image, and this is the same reason acff1c6 published it on the rigs. **It is not a permanent
+port**: x11vnc runs `-nopw` and the dstack gateway puts it on the public internet, so anyone who
+learns the app id gets the bot's desktop and whatever Google session is signed into it. Publish,
+provision or debug, then take it back out and redeploy.
+
+- [ ] Run the redeploy (needs a human: it is a deployment and it opens a public port):
+      `phala cvms upgrade 47fa4ee3bb631593a875d0d900e3959dc2ddc003 -c docker-compose.cvm.yml -e cvm.env`
+- [ ] Then watch `https://47fa4ee3…-6080.dstack-pha-prod7.phala.network/vnc.html?autoconnect=1`
+      through a spawn and find out where the join dies.
+- [ ] The Google profile is a DECISION, not a task. Either sign in fresh on the CVM over noVNC
+      (credentials never leave Andrew's hands), or explicitly authorise copying the rig's profile
+      dir onto other people's hardware. Not done unasked: `credentials.md` says the whole profile
+      dir is the credential, and a TEE is still someone else's machine.
+- [ ] `docker-compose.cvm.yml` pins `port-call-lite:agent1` and nothing bumps it, so the hosted
+      lane silently falls behind prod. The camera work below is on both rigs and NOT in that image.

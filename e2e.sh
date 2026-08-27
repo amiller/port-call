@@ -27,7 +27,9 @@ PASS=0; FAIL=0
 # meeting actually looked like from its seat — not a reconstruction.
 REC=${RECORD:-0}
 STAMP=$(date +%Y%m%d-%H%M%S)
-ART=$RIGDIR/artifacts/$STAMP
+# ART is overridable so a scheduled runner can put the evidence where it keeps the rest of it
+# (daily.sh does), instead of leaving it in a per-rig directory nothing prunes.
+ART=${ART:-$RIGDIR/artifacts/$STAMP}
 STEPS=""
 shot() {
   [ "$REC" = 1 ] || return 0
