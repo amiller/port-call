@@ -27,7 +27,7 @@ EMOJI = ["👍", "🎉", "💖", "👏", "😂", "😮"]
 # in patches/bot-camera.ts; an unknown name is REJECTED by the bot with the valid set named, so a
 # drift here shows up as a loud error in the log rather than as a silently unchanged tile.
 AVATARS = ["rooster", "hancock", "tina", "dmarz"]   # the bot exposes avatars() live; this list is a drift risk (see #37)
-BACKGROUNDS = ["transcript", "vitals", "brainrot"]
+BACKGROUNDS = ["transcript", "vitals", "swarm", "brainrot"]
 # One-tap looks for driving a live meeting: (label, avatar, background).
 PRESETS = [("heartbeat", "rooster", "transcript"),
            ("vitals", "rooster", "vitals"),
