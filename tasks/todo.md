@@ -453,3 +453,40 @@ provision or debug, then take it back out and redeploy.
       dir is the credential, and a TEE is still someone else's machine.
 - [ ] `docker-compose.cvm.yml` pins `port-call-lite:agent1` and nothing bumps it, so the hosted
       lane silently falls behind prod. The camera work below is on both rigs and NOT in that image.
+
+## 2026-08-27 the hosted instance was never signed in, and thought it was  — FOUND, FIXED
+
+noVNC went up on `port-call-demo2` and the answer was on the screen in one frame: the bot was
+sitting on Meet's **"What's your name?"** with *Join now* greyed out, rooster HUD rendering
+perfectly beside it, until the 5-minute admission timeout destroyed the workload. From outside, all
+the gateway could say was *"the bot never reported (never started)"*.
+
+**The bug.** Signed-in mode is decided by `existsSync('/var/lib/vexa/google-session-live')` — in
+`patches/bot-index.ts:198` and again in `patches/bot-capture-bridge.ts:109`. Docker creates a mount
+point the moment a compose file *declares* the volume, so on an instance with no profile at all the
+check reads TRUE: `--incognito` is stripped, guest name-entry is skipped as "signed-in Meet has no
+name field" — and then nothing fills the name field that Meet is in fact showing. The bot waits for
+a page it will never get. **The rigs cannot reproduce this**, because their volume holds a real
+profile; every fresh deployment has it, and no rig does.
+
+- [x] `hasSignedInProfile(dir)` in `capture-bridge.ts`, used by both call sites: test for
+      `Local State`, the file only a real Chromium user-data-dir has and provisionLogin writes.
+- [x] `probe/profile-bench.mjs` + a bench rung: empty volume → guest, `Local State` → signed in,
+      missing dir → guest. It belongs on the bench rung precisely because an e2e in an OPEN lab room
+      passes either way — which is exactly why this hid.
+- [x] Deployed to rig 4, `./daily.sh` GREEN (bench green, e2e 10/10). Both rigs hold real profiles,
+      so for them the change is a no-op; the probe is what proves the fix.
+- [ ] The published images are pinned `:agent1` and nothing bumps them, so the CVM keeps the old
+      check until they are rebuilt and pushed. Until then `docker-compose.cvm.yml` mounts the volume
+      one level up (`/var/lib/vexa/google-session`), which makes the empty case honest on the OLD
+      image: no profile path exists, the bot joins as a guest, open rooms work.
+- [ ] Needs the redeploy to prove: `phala cvms upgrade <app-id> -c docker-compose.cvm.yml -e cvm.env`,
+      then spawn into the lab room and watch it get past the name field.
+
+### Also: e2e's screen_share check was a fixed sleep, and it flaked
+
+The 11:07 daily run reported `FAIL screen_share` while `PASS presenting confirmed in DOM` ten
+seconds later contradicted it. The share is the slowest act — picker, tab, republish — and a
+12-second `sleep` turns "slower than usual" into a red line. `waitlog <pattern> <substr> <secs>`
+polls instead. A scheduled rung that cries wolf is worse than no rung, so this got fixed the hour
+it appeared rather than being written down as flakiness.

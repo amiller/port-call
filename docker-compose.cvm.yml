@@ -111,7 +111,20 @@ services:
       # Same reasoning as the rig compose: a signed-in profile only survives on a volume. Populate
       # it with `phala cp` (SSH into a CVM works: <app-id>-22.<base-domain> on :443) — without it
       # the bot joins anonymously and only OPEN rooms work.
-      - google-session:/var/lib/vexa/google-session-live
+      #
+      # But NOT mounted at the path the bot tests. Docker creates the mount point, and this image
+      # (pinned :agent1) reads the DIRECTORY's existence as "there is a signed-in profile here" —
+      # so an instance with no profile at all stripped --incognito, skipped guest name-entry, and
+      # stranded itself on Meet's "What's your name?" until the admission timeout destroyed the
+      # workload. Watched happen over noVNC on port-call-demo2, 2026-08-27. Fixed properly in
+      # patches/bot-capture-bridge.ts (hasSignedInProfile: look for `Local State`, not the folder),
+      # which reaches here only when these image tags are next bumped.
+      #
+      # One level up, the empty case is honest: no profile path exists, the bot joins as a guest,
+      # and open rooms work — which is everything a CVM without a profile could do anyway. The
+      # volume still holds whatever gets provisioned into it later; pointing the bot at it then
+      # needs the rebuilt image (or VEXA_PROFILE_DIR, which nothing has exercised yet).
+      - google-session:/var/lib/vexa/google-session
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"

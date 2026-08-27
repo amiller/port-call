@@ -32,13 +32,13 @@ import { createBrowserJoinDriver } from './join-driver.js';
 import { createBotPipeline, type BotPipeline } from './pipeline.js';
 import { createBotRecordingSink } from './recording.js';
 import { createCaptureTap } from './capture-tap.js';
-import { launchBrowser, startCaptureBridge, startRecording, createSpeakController, type BrowserSession, type SpeakController } from './capture-bridge.js';
+import { launchBrowser, startCaptureBridge, startRecording, createSpeakController, hasSignedInProfile, type BrowserSession, type SpeakController } from './capture-bridge.js';
 import { type ScreenShareController } from './screen-share.js';
 import { type SelfCheck } from './selfcheck.js';
 import { type ChatController } from './chat.js';
 import { createCameraController, type CameraController } from './camera.js';
 import { type ReactionController } from './reactions.js';
-import { statSync, existsSync } from 'node:fs';
+import { statSync } from 'node:fs';
 
 /**
  * Load a surface controller FRESH per act, cache-busted by the file's mtime.
@@ -195,7 +195,9 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
     // Signed-in mode is decided by the presence of the VNC-login profile (capture-bridge launches
     // with it), so the join layer must skip guest name-entry — signed-in Meet has no name field,
     // and the guest path stalls 2min hunting for it, then fails the join (2026-08-13).
-    if (existsSync(env.VEXA_PROFILE_DIR ?? '/var/lib/vexa/google-session-live')) inv.authenticated = true;
+    // hasSignedInProfile, not existsSync: a declared-but-empty volume creates the directory, and
+    // believing that is a signed-in profile strands the bot on guest name-entry forever.
+    if (hasSignedInProfile(env.VEXA_PROFILE_DIR ?? '/var/lib/vexa/google-session-live')) inv.authenticated = true;
   } catch (e) {
     if (e instanceof InvocationError) {
       // No valid connection_id to attribute the failure to → emit a best-effort terminal

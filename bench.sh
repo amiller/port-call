@@ -50,6 +50,10 @@ echo "== camera skins: every avatar x background renders, and renders DIFFERENTL
 docker cp "$(dirname "$0")/probe/skin-bench.mjs" "$C:/tmp/skin-bench.mjs" >/dev/null
 docker exec "$C" sh -c "DISPLAY=:99 node /tmp/skin-bench.mjs | tail -4" || FAIL=1
 
+echo "== profile: an empty volume is a GUEST, not a signed-in account =="
+docker cp "$(dirname "$0")/probe/profile-bench.mjs" "$C:/tmp/profile-bench.mjs" >/dev/null
+docker exec "$C" node /tmp/profile-bench.mjs | tail -1 || FAIL=1
+
 echo "== surfaces: chat / camera / share / reaction vs Meet-shaped DOM =="
 docker cp "$(dirname "$0")/probe/mock-meet.html" "$C:/tmp/mock-meet.html" >/dev/null
 docker cp "$(dirname "$0")/probe/surface-bench.mjs" "$C:/tmp/surface-bench.mjs" >/dev/null

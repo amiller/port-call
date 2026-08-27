@@ -40,6 +40,8 @@ ok()   { echo "PASS $*"; PASS=$((PASS+1)); }
 bad()  { echo "FAIL $*"; FAIL=$((FAIL+1)); }
 act()  { docker exec "$C" redis-cli PUBLISH "bot_commands:meeting:$ID" "$1" >/dev/null; }
 log()  { docker exec "$C" sh -c "grep -h '$1' /tmp/vexa-workloads/mtg-$ID-*.log 2>/dev/null | tail -1"; }
+# Wait up to $3 seconds for log line $1 to contain $2, instead of sleeping a guess and asserting once.
+waitlog() { for _ in $(seq 1 "$3"); do log "$1" | grep -q "$2" && return 0; sleep 1; done; return 1; }
 
 curl -s -X DELETE "$GW/bots/google_meet/$CODE" -H "X-API-Key: $BOT" -o /dev/null || true
 sleep 8
@@ -76,8 +78,12 @@ act '{"action":"selfcheck"}'; sleep 9
 log '\[selfcheck\]' | grep -q '"cameraOn":true' && ok "camera ON in Meet" || bad "camera not on in Meet (avatar shown)"
 shot camera
 
-act '{"action":"screen_share","text":"E2E share"}';             sleep 12
-log '\[share\]'           | grep -q '"presenting":true' && ok screen_share || bad screen_share
+act '{"action":"screen_share","text":"E2E share"}'
+# Acts settle asynchronously and the share is the slowest of them — Meet has to raise the picker,
+# take the tab and republish the track. A fixed sleep turns "slower than usual" into a FAIL, which
+# is how a scheduled rung learns to cry wolf: the 2026-08-27 11:07 daily run reported screen_share
+# red while the selfcheck ten seconds later confirmed presenting:true in the DOM. Poll instead.
+waitlog '\[share\]' '"presenting":true' 30 && ok screen_share || bad screen_share
 shot share
 
 # 🎊 not 🎉 — Meet's picker offers 🎊 💗 💯 😆 🙁 😲 (dumped live); 🎉 is simply not in it.
