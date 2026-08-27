@@ -490,3 +490,26 @@ seconds later contradicted it. The share is the slowest act — picker, tab, rep
 12-second `sleep` turns "slower than usual" into a red line. `waitlog <pattern> <substr> <secs>`
 polls instead. A scheduled rung that cries wolf is worse than no rung, so this got fixed the hour
 it appeared rather than being written down as flakiness.
+
+### The hosted instance joins now — and the next wall is visible
+
+`phala cvms upgrade` with the re-mounted volume, then a spawn into the lab room:
+`joining` → **`active` in ~30 seconds**, meeting 4, on the pinned `:agent1` image. The empty-volume
+deadlock is gone; a profile-less CVM joins open rooms as the guest it actually is.
+
+But noVNC showed the tile as a grey **"P"**: the bot is in the room with its **camera off**. The
+HUD is installed at navigation (it renders in the pre-join preview), and the camera only comes ON
+when something sends the `camera_show` act — and acts travel on the container's redis bus, which
+`demo.sh`, `board.py` and `e2e.sh` all reach by `docker exec`. **A tenant has no exec.** The
+gateway's tenant surface is spawn / status / transcripts / ws / delete; every trick this project is
+actually about — camera, chat, reactions, screen share, speak — is unreachable from outside the
+host. That is the real gap in the hosted lane, and it is bigger than the join was.
+
+- [ ] Acts over the gateway: `POST /bots/{platform}/{id}/acts`, scoped to the caller's own meeting,
+      publishing to the same redis channel. Nothing else makes a hosted instance demoable, and it
+      is the difference between "a bot joined" and "the bot did the thing".
+- [ ] Bump `port-call-lite` / `-shims` and the two tags in `docker-compose.cvm.yml`. The hosted
+      image predates the swarm background, hancock, the safe-band relayouts and now the profile fix.
+- [ ] Transcription on the CVM is still unproven: segments=0 in an empty room proves the endpoint,
+      not the near-shim path. Needs someone to speak in the room, or the duel rung.
+- [x] 6080 commented back out in the compose. **demo2 still has it open until the next upgrade.**
