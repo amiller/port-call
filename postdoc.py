@@ -239,7 +239,7 @@ def existing_doc(svc, mid):
 GAP_MARK_S = 120
 
 
-def build_markdown(mid, include_raw=False, merge=()):
+def build_markdown(mid, include_raw=False, merge=(), force=False):
     ids = [mid, *merge]
     rows = json.loads(sql(
         "select coalesce(json_agg(json_build_object('id',id,'code',platform_specific_id,"
@@ -249,8 +249,8 @@ def build_markdown(mid, include_raw=False, merge=()):
     if len(rows) != len(ids):
         sys.exit(f"asked for {ids}, found {[r['id'] for r in rows]}")
     for r in rows:
-        if r["status"] != "completed":
-            sys.exit(f"meeting {r['id']} is {r['status']}, not completed")
+        if r["status"] != "completed" and not force:
+            sys.exit(f"meeting {r['id']} is {r['status']}, not completed (--force to override)")
     codes = {r["code"] for r in rows}
     if len(codes) != 1:
         sys.exit(f"refusing to stitch different rooms: {codes}")
@@ -381,7 +381,7 @@ def run(mid, args):
     # --from-file replays an approved --dry-run capture verbatim. Regenerating would produce
     # DIFFERENT notes from the ones a human read and approved, and the doc goes to other people.
     title, body, emails = (from_capture(args.from_file) if args.from_file
-                           else build_markdown(mid, include_raw=args.raw,
+                           else build_markdown(mid, include_raw=args.raw, force=args.force,
                                               merge=[int(x) for x in args.merge.split(',') if x.strip()]))
     emails = list(dict.fromkeys(emails + args.also))
     if args.caveat:
@@ -434,6 +434,12 @@ def main():
                    help="comma-separated extra meeting ids to stitch in (same room only) — one "
                         "conversation split across rows by a crash, eviction or rejoin")
     p.add_argument("--delete-after", action="store_true")
+    # A row can be `failed` because the runtime lost the container long after everyone hung up —
+    # the watchdog marks it, not the conversation. The transcript is whole either way, so the
+    # operator gets to say so; the guard stays on by default because an in-flight meeting is not
+    # a meeting.
+    p.add_argument("--force", action="store_true",
+                   help="write the doc even though the meeting row is not `completed`")
     # The roster resolves SPEAKERS. Someone who attended and never said a word is invisible to it,
     # so a quiet attendee silently misses the doc — the same "shared with 3 of 4 and looks fine"
     # failure the roster exists to prevent, arriving from the other direction.
