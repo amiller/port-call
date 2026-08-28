@@ -8,13 +8,16 @@ demo.sh; nothing here is a second implementation of the bot's behaviour.
 Deliberately has no auth: it is bound to a machine on a private network and it can make a bot join
 a meeting, so do NOT expose it to the internet.
 """
-import json, os, pathlib, re, subprocess, urllib.request
+import json, mimetypes, os, pathlib, re, subprocess, urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 CONTAINER = "vexa-rig-vexa-lite-1"
 GATEWAY = "http://localhost:8056"
 BOT_TOKEN = open("/tmp/vexa-bot-token.txt").read().strip()
 TX_TOKEN = open("/tmp/vexa-tx-token.txt").read().strip()
+# The daily rung writes its evidence here (daily.sh). Served read-only at /daily so a run is
+# something you can look at rather than something you have to ssh for.
+DAILY = "/media/amiller/fractal-nvme2/vexa-archive/daily"
 SFX = ["airhorn", "gavel", "ding", "objection", "order", "noted", "correct", "welcome", "timesup"]
 # Meet's picker set VARIES by UI state — a dump taken while presenting showed 🎊 💗 💯 😆 🙁 😲,
 # while the normal in-call picker shows these. The controller fails loudly (with the candidate
@@ -24,7 +27,7 @@ EMOJI = ["👍", "🎉", "💖", "👏", "😂", "😮"]
 # in patches/bot-camera.ts; an unknown name is REJECTED by the bot with the valid set named, so a
 # drift here shows up as a loud error in the log rather than as a silently unchanged tile.
 AVATARS = ["rooster", "hancock", "tina", "dmarz"]   # the bot exposes avatars() live; this list is a drift risk (see #37)
-BACKGROUNDS = ["transcript", "vitals", "brainrot"]
+BACKGROUNDS = ["transcript", "vitals", "swarm", "brainrot"]
 # One-tap looks for driving a live meeting: (label, avatar, background).
 PRESETS = [("heartbeat", "rooster", "transcript"),
            ("vitals", "rooster", "vitals"),
@@ -58,7 +61,7 @@ PAGE = """<!doctype html><meta charset=utf-8><title>Vexa console</title>
  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:middle}
 </style>
 
-<h1>Vexa console</h1>
+<h1>Vexa console <a href=/daily style="font-size:13px;font-weight:400;color:#8ab4ff">daily rung ›</a></h1>
 <div id=status>…</div>
 
 <h2>meeting</h2>
@@ -270,6 +273,12 @@ class H(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(json.dumps([{"code": "", "summary": f"calendar unavailable: {e}",
                                                "when": "--:--", "soon": False}]), "application/json")
+        if self.path.startswith("/daily"):
+            # Path is joined then checked, so a ../ in the URL cannot climb out of DAILY.
+            f = os.path.normpath(os.path.join(DAILY, self.path[6:].lstrip("/") or "index.html"))
+            if not f.startswith(DAILY): return self._send(b"nope", "text/plain", raw=True)
+            return self._send(open(f, "rb").read(),
+                              mimetypes.guess_type(f)[0] or "text/plain", raw=True)
         if self.path.startswith("/shot.png"):
             try:
                 return self._send(open("/tmp/board-shot.png", "rb").read(), "image/png", raw=True)

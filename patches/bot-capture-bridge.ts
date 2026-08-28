@@ -95,6 +95,23 @@ export interface BrowserSession {
  * remote-browser auth args, so the page the JoinDriver receives is configured identically to
  * what @vexa/join expects.  // L4 (O6/VM): live-validated against a real meeting.
  */
+/**
+ * Is there a REAL signed-in Chromium profile at `dir`?
+ *
+ * A mounted-but-empty volume is not one. Docker creates the mount point, so a bare existsSync on
+ * the directory goes TRUE the moment a compose file declares the volume — which is exactly how the
+ * hosted instance (port-call-demo2, 2026-08-27) came to believe it was signed in: it stripped
+ * --incognito, skipped guest name-entry, and then sat on Meet's "What's your name?" with Join now
+ * greyed out until the 5-minute admission timeout destroyed the workload. From outside, all the
+ * gateway could say was "the bot never reported". The rigs never hit it because their volume holds
+ * a real profile.
+ *
+ * `Local State` is what only a Chromium user-data-dir has, and provisionLogin writes it.
+ */
+export function hasSignedInProfile(dir: string): boolean {
+  return existsSync(`${dir}/Local State`);
+}
+
 export async function launchBrowser(inv: Invocation): Promise<BrowserSession> {
   // Every bot gets its OWN profile dir — concurrent bots sharing one dir die on Chromium's
   // SingletonLock (#478: joining → failed <1s, "Opening in existing browser session").
@@ -106,7 +123,7 @@ export async function launchBrowser(inv: Invocation): Promise<BrowserSession> {
   // participants entirely. Move the dir aside to go back to guest joins. One bot at a time:
   // Chromium's SingletonLock on the shared dir kills a second launch (#478).
   const liveProfile = process.env.VEXA_PROFILE_DIR ?? '/var/lib/vexa/google-session-live';
-  const signedIn = existsSync(liveProfile);
+  const signedIn = hasSignedInProfile(liveProfile);
   const dataDir = signedIn ? liveProfile : makeEphemeralProfileDir();
   if (signedIn) cleanStaleLocks(dataDir);
   if (inv.authenticated && inv.userdataS3Path) {

@@ -79,7 +79,7 @@ services:
     restart: unless-stopped
 
   vexa-lite:
-    image: ghcr.io/amiller/port-call-lite:console1
+    image: ghcr.io/amiller/port-call-lite:agent1
     shm_size: 2gb
     depends_on:
       postgres: {condition: service_healthy}
@@ -95,12 +95,39 @@ services:
       # X-Admin-API-Key: ADMIN_TOKEN. That token is then the entire perimeter for creating users
       # and minting tokens — use a strong one, never the rig's dev value.
       - "8001:8001"
+      # noVNC onto the bot's own X display (x11vnc + websockify already run in the image). The rigs
+      # publish this because the Google sign-in is the one step a human must do and it cannot be
+      # done blind — and on a CVM it is also the only way to SEE a join fail, since there is no
+      # docker exec and `phala cvms logs` returns a short, shifting window.
+      #
+      # READ THIS BEFORE LEAVING IT UP: x11vnc runs -nopw, and the dstack gateway puts this on the
+      # public internet at <app-id>-6080.<base-domain>. Anyone who learns the app id — it is in the
+      # dashboard and in the attestation — gets the bot's desktop, including whatever Google
+      # session is signed into it. Publish it to provision or to debug, then take it back out and
+      # redeploy. It is not a permanent port, so it lives here COMMENTED: uncomment, upgrade, do the
+      # one thing that needs eyes, comment it out and upgrade again. On 2026-08-27 it was up for
+      # about twenty minutes and paid for itself — it is how the guest-name-entry deadlock below was
+      # found, after `phala cvms logs` had nothing to say.
+      # - "6080:6080"
     volumes:
       - recordings:/var/lib/vexa/recordings
       # Same reasoning as the rig compose: a signed-in profile only survives on a volume. Populate
       # it with `phala cp` (SSH into a CVM works: <app-id>-22.<base-domain> on :443) — without it
       # the bot joins anonymously and only OPEN rooms work.
-      - google-session:/var/lib/vexa/google-session-live
+      #
+      # But NOT mounted at the path the bot tests. Docker creates the mount point, and this image
+      # (pinned :agent1) reads the DIRECTORY's existence as "there is a signed-in profile here" —
+      # so an instance with no profile at all stripped --incognito, skipped guest name-entry, and
+      # stranded itself on Meet's "What's your name?" until the admission timeout destroyed the
+      # workload. Watched happen over noVNC on port-call-demo2, 2026-08-27. Fixed properly in
+      # patches/bot-capture-bridge.ts (hasSignedInProfile: look for `Local State`, not the folder),
+      # which reaches here only when these image tags are next bumped.
+      #
+      # One level up, the empty case is honest: no profile path exists, the bot joins as a guest,
+      # and open rooms work — which is everything a CVM without a profile could do anyway. The
+      # volume still holds whatever gets provisioned into it later; pointing the bot at it then
+      # needs the rebuilt image (or VEXA_PROFILE_DIR, which nothing has exercised yet).
+      - google-session:/var/lib/vexa/google-session
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"

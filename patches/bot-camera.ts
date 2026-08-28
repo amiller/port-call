@@ -384,6 +384,12 @@ export function installHud(): void {
     ctx.restore();
   };
 
+  // Background only. A real registry entry rather than a guard at the draw call, so the console
+  // lists it, the contact sheet renders it, and an unknown-name typo still throws (#60). The
+  // backgrounds assume a character owns the middle of the frame; with none selected that room is
+  // simply unused, which is a layout question this deliberately does not answer.
+  AVATARS.none = () => {};
+
   // ── the backgrounds ──────────────────────────────────────────────────────────────────────
   // Each paints the full frame BEFORE the avatar and the telemetry footer go on top. Same rule as
   // the avatars: what moves must be downstream of a real signal (segment arrival, RMS amplitude,
@@ -409,7 +415,7 @@ export function installHud(): void {
     ctx.font = 'bold 56px system-ui, sans-serif';
     rows.forEach((r: any, i: any) => ctx.fillText(r, W / 2, 136 + i * 60));
 
-    ctx.fillStyle = 'rgba(76,76,102,0.95)'; ctx.font = '26px system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(146,146,178,0.95)'; ctx.font = '26px system-ui, sans-serif';
     S.lines.slice(-3, -1).reverse().forEach((l: any, i: any) =>
       ctx.fillText(clipFit(l, '26px system-ui, sans-serif'), W / 2,
                    96 + rows.length * 62 + 34 + i * 30));
@@ -421,35 +427,47 @@ export function installHud(): void {
     const upS = Math.max(1, (Date.now() - S.started) / 1000);
     const sinceS = S.lastAt ? (Date.now() - S.lastAt) / 1000 : -1;
     const rate = (S.segments / upS) * 60;
+    // Two columns inside SAFE, stacked, all of it ABOVE the character. The original layout put
+    // four cells across the full 1280 at x=70/340/700/1010 with a 500px bar out to x=1200: half
+    // the panel — SEGMENTS, UPTIME, SPEAKER and most of the bar — rendered into the cropped margin
+    // and was never on screen. Found the moment the contact sheet showed the band (#57).
+    const CX0 = SAFE_X0 + 24, CX1 = SAFE_X0 + 290, COL = 250;
     const cell = (x: any, y: any, label: any, value: any, colour: any) => {
       ctx.textAlign = 'left';
-      ctx.fillStyle = 'rgba(255,255,255,0.30)'; ctx.font = '22px system-ui, sans-serif';
-      ctx.fillText(label, x, y);
-      ctx.fillStyle = colour; ctx.font = 'bold 60px system-ui, sans-serif';
-      ctx.fillText(value, x, y + 62);
+      ctx.fillStyle = 'rgba(255,255,255,0.30)'; ctx.font = '18px system-ui, sans-serif';
+      ctx.fillText(clipCol(label, '18px system-ui, sans-serif'), x, y);
+      ctx.fillStyle = colour; ctx.font = 'bold 46px system-ui, sans-serif';
+      ctx.fillText(clipCol(value, 'bold 46px system-ui, sans-serif'), x, y + 50);
+    };
+    const clipCol = (txt: any, font: any) => {
+      ctx.font = font;
+      let x = String(txt);
+      while (x.length > 1 && ctx.measureText(x).width > COL) x = x.slice(0, -1);
+      return x;
     };
     const green = '#7ce28b', amber = '#f5a524', red = '#ff7b72', dim = '#5a5a70';
-    cell(70, 96, 'SEGMENTS', String(S.segments), S.segments ? green : dim);
-    cell(340, 96, 'SEGMENTS / MIN', S.segments ? rate.toFixed(1) : '—', S.segments ? green : dim);
-    cell(700, 96, 'SINCE LAST',
+    cell(CX0, 76, 'SEGMENTS', String(S.segments), S.segments ? green : dim);
+    cell(CX1, 76, 'SEGMENTS / MIN', S.segments ? rate.toFixed(1) : '—', S.segments ? green : dim);
+    cell(CX0, 178, 'SINCE LAST',
          sinceS < 0 ? 'never' : sinceS.toFixed(1) + 's',
          sinceS < 0 ? red : (sinceS < 6 ? green : amber));
-    cell(1010, 96, 'UPTIME', Math.round(upS) + 's', dim);
+    cell(CX1, 178, 'UPTIME', Math.round(upS) + 's', dim);
 
     ctx.textAlign = 'left';
-    ctx.fillStyle = 'rgba(255,255,255,0.30)'; ctx.font = '22px system-ui, sans-serif';
-    ctx.fillText('SPEAKER', 70, 232);
-    ctx.fillStyle = S.speaker ? '#ffffff' : dim; ctx.font = 'bold 44px system-ui, sans-serif';
-    ctx.fillText((S.speaker || 'nobody yet').slice(0, 24), 70, 282);
+    ctx.fillStyle = 'rgba(255,255,255,0.30)'; ctx.font = '18px system-ui, sans-serif';
+    ctx.fillText('SPEAKER', CX0, 258);
+    ctx.fillStyle = S.speaker ? '#ffffff' : dim; ctx.font = 'bold 30px system-ui, sans-serif';
+    ctx.fillText(clipCol(S.speaker || 'nobody yet', 'bold 30px system-ui, sans-serif'), CX0, 296);
 
     // Outbound audio: the bar only moves when TTS PCM is actually flowing, so a dead speak path
     // reads as a flat bar rather than as silence you have to guess about.
-    ctx.fillStyle = 'rgba(255,255,255,0.30)'; ctx.font = '22px system-ui, sans-serif';
-    ctx.fillText('OUR AUDIO OUT', 700, 232);
-    ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(700, 252, 500, 34);
+    ctx.fillStyle = 'rgba(255,255,255,0.30)'; ctx.font = '18px system-ui, sans-serif';
+    ctx.fillText('OUR AUDIO OUT', CX1, 258);
+    const barW = SAFE_X1 - 24 - CX1;
+    ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(CX1, 272, barW, 28);
     const amp = Math.min(S.amplitude * 2, 1);
     ctx.fillStyle = state === 'speaking' ? green : (state === 'winding-up' ? amber : dim);
-    ctx.fillRect(700, 252, Math.max(4, 500 * amp), 34);
+    ctx.fillRect(CX1, 272, Math.max(4, barW * amp), 28);
     ctx.textAlign = 'center';
   };
 
@@ -562,21 +580,34 @@ export function installHud(): void {
       ctx.fillRect(0, p, W, 46 + energy * 54);
     }
 
-    const words = (S.lines.slice(-3).join(' ').match(/\S+/g) || []).slice(-9);
+    const words = (S.lines.slice(-3).join(' ').match(/\S+/g) || []).slice(-6);
     ctx.textAlign = 'center';
     words.forEach((w: any, i: any) => {                   // one word per recent token, no filler
       const seed = (i * 97 + S.segments * 31) % 360;
-      // Alternate sides and keep clear of the middle third: the avatar stands there, and a word
-      // drawn behind it is a word nobody reads.
-      const x = i % 2 ? 830 + ((seed * 7) % 330) : 110 + ((seed * 7) % 330);
-      const y = 130 + ((seed * 13) % 470);
-      const sz = 26 + (seed % 30) + amp * 46;
+      const txt = w.slice(0, 16).toUpperCase();
+      // Size is emphasis, but a word wider than its lane lands on its neighbour: six words in two
+      // columns, each shrunk until it fits. Nine across three lanes of 170px collided constantly,
+      // because a bold 50px FACILITATOR is ~300px on its own.
+      const lane = (SAFE_W - 48) / 2;
+      let sz = 26 + (seed % 30) + amp * 46;
+      ctx.font = 'bold ' + sz + 'px system-ui, sans-serif';
+      while (sz > 16 && ctx.measureText(txt).width > lane - 12) {
+        sz -= 2; ctx.font = 'bold ' + sz + 'px system-ui, sans-serif';
+      }
+      // Three rows ABOVE the character, inside the band. The original scatter dodged the centre of
+      // the 1280 canvas (x 110..440 / 830..1160) — which is precisely the strip Meet keeps, so
+      // every word was drawn, published and cropped away unseen. Clamping them into the band then
+      // put them across the avatar's face instead. Neither is a placement: the character owns the
+      // lower two thirds of the tile, the words own the top, and both stay inside SAFE.
+      const half = ctx.measureText(txt).width / 2;
+      const slot = SAFE_X0 + 24 + (i % 2) * lane + lane / 2;
+      const x = Math.min(SAFE_X1 - half - 12, Math.max(SAFE_X0 + half + 12, slot + ((seed % 20) - 10)));
+      const y = 108 + ((i / 2) | 0) * 80 + ((seed * 13) % 16);
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(Math.sin(t / 26 + i) * 0.22 * energy);
       ctx.fillStyle = 'hsla(' + ((hue + seed) % 360) + ',95%,' + (62 + amp * 22) + '%,' + (0.30 + energy * 0.5) + ')';
-      ctx.font = 'bold ' + sz + 'px system-ui, sans-serif';
-      ctx.fillText(w.slice(0, 16).toUpperCase(), 0, 0);
+      ctx.fillText(txt, 0, 0);
       ctx.restore();
     });
 
