@@ -115,19 +115,28 @@ services:
       # it with `phala cp` (SSH into a CVM works: <app-id>-22.<base-domain> on :443) — without it
       # the bot joins anonymously and only OPEN rooms work.
       #
-      # Mounted at the path the bot actually tests, which only became safe with these tags. The
-      # old :agent1 image decided signed-in mode by existsSync on this directory, and Docker
-      # creates a mount point the moment a compose file declares the volume — so an instance with
-      # no profile read as signed in, stripped --incognito, skipped guest name-entry and stranded
-      # itself on Meet's "What's your name?" until the admission timeout destroyed the workload.
-      # Watched happen over noVNC on port-call-demo2, 2026-08-27; the workaround was to mount one
-      # level up so the path the bot tests did not exist.
+      # NOT mounted at the path the bot tests, and hasSignedInProfile did NOT make that safe —
+      # measured 2026-08-28, twice, in both directions.
       #
-      # hasSignedInProfile (patches/bot-capture-bridge.ts) tests for `Local State`, the file only a
-      # real Chromium user-data-dir has, so an empty volume is now honest by itself: guest join,
-      # open rooms work. Keeping the mount one level up would be worse than useless here — a
-      # profile provisioned into the volume would sit somewhere the bot never looks.
-      - google-session:/var/lib/vexa/google-session-live
+      # The old :agent1 image decided signed-in mode by existsSync on this directory, and Docker
+      # creates a mount point the moment a compose file declares the volume, so a profile-less CVM
+      # read as signed in and stranded itself on Meet's "What's your name?" (2026-08-27, watched
+      # over noVNC). hasSignedInProfile tests for `Local State` instead, which looked like it made
+      # mounting at the real path honest again. It does not.
+      #
+      # Mounted at .../google-session-live, the FIRST bot after a fresh volume joins normally
+      # (mtg 39: joining -> active in ~30s) and every bot after it hangs in `joining` until the
+      # admission timeout — the authenticated path taken with a profile that has no session, which
+      # is the same wall prod hit the same day. Something in that first run leaves the directory
+      # looking like a real user-data-dir. Reverting this one line took the pod from four
+      # consecutive dead joins (mtgs 41, 42, 43, 76, two rooms, across a restart AND a container
+      # recreate) back to `active` in 25s (mtg 109).
+      #
+      # So: one level up until someone finds what writes there. The cost is that a profile
+      # provisioned into this volume is invisible to the bot, which is a known gap and not a
+      # regression — no CVM has ever had a profile. Whoever closes it must re-test the SECOND join,
+      # not just the first; the first one always works and that is exactly what makes this bite.
+      - google-session:/var/lib/vexa/google-session
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"
