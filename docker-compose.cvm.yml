@@ -64,7 +64,7 @@ services:
       retries: 20
 
   near-shim:
-    image: ghcr.io/amiller/port-call-shims:03f98b2
+    image: ghcr.io/amiller/port-call-shims:fceee16
     command: uvicorn near-shim:app --host 0.0.0.0 --port 8001
     environment:
       NEAR_API_KEY: ${NEAR_API_KEY}
@@ -72,14 +72,14 @@ services:
     restart: unless-stopped
 
   tts-shim:
-    image: ghcr.io/amiller/port-call-shims:03f98b2
+    image: ghcr.io/amiller/port-call-shims:fceee16
     command: uvicorn tts-shim:app --host 0.0.0.0 --port 8002
     environment:
       TTS_ENGINE: piper
     restart: unless-stopped
 
   vexa-lite:
-    image: ghcr.io/amiller/port-call-lite:03f98b2
+    image: ghcr.io/amiller/port-call-lite:fceee16
     shm_size: 2gb
     depends_on:
       postgres: {condition: service_healthy}
@@ -132,10 +132,23 @@ services:
       # consecutive dead joins (mtgs 41, 42, 43, 76, two rooms, across a restart AND a container
       # recreate) back to `active` in 25s (mtg 109).
       #
-      # So: one level up until someone finds what writes there. The cost is that a profile
-      # provisioned into this volume is invisible to the bot, which is a known gap and not a
-      # regression — no CVM has ever had a profile. Whoever closes it must re-test the SECOND join,
-      # not just the first; the first one always works and that is exactly what makes this bite.
+      # ANSWERED 2026-08-28 (#76). The volume already holds a full Chromium user-data-dir —
+      # `Local State`, Default/, ShaderCache, Variations, first_party_sets.db — with cache
+      # directories dated Aug 25, days before any of the runs above. Read out by mounting the
+      # volume into a throwaway alpine container and printing it, because a CVM has no exec, this
+      # app's allowed_envs carries no DSTACK_AUTHORIZED_KEYS so there is no SSH, and noVNC shows
+      # only the browser (the image ships no terminal emulator).
+      #
+      # It was not seeded by Docker: the image has no /var/lib/vexa at all, verified. It was
+      # written by a container — this compose mounted the volume AT the tested path until 6464629
+      # on Aug 27, and the then-current image decided signed-in mode by existsSync, so every bot
+      # adopted the empty mount point as its user-data-dir and Chromium filled it in. Moving the
+      # mount up hid that; it did not remove it.
+      #
+      # So the trap is self-arming and already armed: any deployment that points the bot at this
+      # volume inherits a profile with no Google session. Emptying it is a prerequisite for ever
+      # provisioning a real one — and whoever does that must test the SECOND join, not just the
+      # first, because the first one succeeds either way and that is what makes this bite.
       - google-session:/var/lib/vexa/google-session
     environment:
       DB_HOST: postgres
