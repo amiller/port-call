@@ -123,3 +123,37 @@ RUN sed -i 's|^command=Xvfb :99 |command=/bin/bash -c "rm -f /tmp/.X99-lock /tmp
  && grep -q 'exec Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset"' \
       /etc/supervisor/conf.d/vexa.conf \
  || (echo "xvfb stale-lock guard did not apply — upstream changed the program line" && exit 1)
+
+# 6. noVNC ON A PUBLIC PORT MUST NOT BE PASSWORDLESS. x11vnc runs `-nopw -localhost`, so the RFB
+#    socket itself is never exposed — the entire perimeter is whoever publishes 6080. On a rig that
+#    is a LAN. On a CVM the dstack gateway puts it at <app-id>-6080.<base-domain>, and anyone who
+#    learns the app id (it is in the dashboard and in the attestation) gets the bot's desktop and
+#    whatever Google session is signed into it. That is why the port lives commented out and why
+#    publishing it has been a decision someone has to make every time.
+#
+#    It does not have to be. websockify ships BasicHTTPAuth and the image already has it; the
+#    credential is ADMIN_TOKEN, which is already the perimeter for minting bot tokens and is already
+#    in the CVM's allowed_envs. No new secret, and nothing to distribute that the operator does not
+#    already hold. Log in as `portcall` with the admin token as the password.
+#
+#    Fail-closed by construction: the auth plugin demands credentials whenever the header is absent,
+#    and the upstream image bakes ADMIN_API_TOKEN=changeme, so the variable is never unset — a weak
+#    token is the operator's choice, an absent one is not reachable from here.
+#
+#    WHAT THIS DOES AND DOES NOT COVER, measured on the built image rather than assumed. The plugin
+#    guards the WEBSOCKET UPGRADE, not the static files `--web` serves:
+#
+#      GET /vnc.html    no creds -> 200   (the noVNC client itself: HTML and JS, no pixels)
+#      GET /websockify  no creds -> 401
+#                       wrong    -> 401
+#                       correct  -> 101 Switching Protocols
+#
+#    Every frame of the bot's desktop crosses that socket, so the screen is closed even though the
+#    page that would render it is not. Anyone claiming this port is "authenticated" should mean that
+#    sentence and not a stronger one.
+RUN sed -i 's|^command=websockify --web /usr/share/novnc 6080 localhost:5900$|command=websockify --web /usr/share/novnc --auth-plugin websockify.auth_plugins.BasicHTTPAuth --auth-source "portcall:%(ENV_ADMIN_API_TOKEN)s" 6080 localhost:5900|' \
+      /etc/supervisor/conf.d/vexa.conf \
+ && grep -q 'auth-plugin websockify.auth_plugins.BasicHTTPAuth' /etc/supervisor/conf.d/vexa.conf \
+ && grep -q 'auth-source "portcall:%(ENV_ADMIN_API_TOKEN)s"' /etc/supervisor/conf.d/vexa.conf \
+ && python3 -c "from websockify.auth_plugins import BasicHTTPAuth" \
+ || (echo "novnc auth guard did not apply — upstream changed the websockify program line" && exit 1)
