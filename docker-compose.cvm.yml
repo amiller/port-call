@@ -64,7 +64,7 @@ services:
       retries: 20
 
   near-shim:
-    image: ghcr.io/amiller/port-call-shims:e7bcf85
+    image: ghcr.io/amiller/port-call-shims:03f98b2
     command: uvicorn near-shim:app --host 0.0.0.0 --port 8001
     environment:
       NEAR_API_KEY: ${NEAR_API_KEY}
@@ -72,14 +72,14 @@ services:
     restart: unless-stopped
 
   tts-shim:
-    image: ghcr.io/amiller/port-call-shims:e7bcf85
+    image: ghcr.io/amiller/port-call-shims:03f98b2
     command: uvicorn tts-shim:app --host 0.0.0.0 --port 8002
     environment:
       TTS_ENGINE: piper
     restart: unless-stopped
 
   vexa-lite:
-    image: ghcr.io/amiller/port-call-lite:agent1
+    image: ghcr.io/amiller/port-call-lite:03f98b2
     shm_size: 2gb
     depends_on:
       postgres: {condition: service_healthy}
@@ -115,19 +115,19 @@ services:
       # it with `phala cp` (SSH into a CVM works: <app-id>-22.<base-domain> on :443) — without it
       # the bot joins anonymously and only OPEN rooms work.
       #
-      # But NOT mounted at the path the bot tests. Docker creates the mount point, and this image
-      # (pinned :agent1) reads the DIRECTORY's existence as "there is a signed-in profile here" —
-      # so an instance with no profile at all stripped --incognito, skipped guest name-entry, and
-      # stranded itself on Meet's "What's your name?" until the admission timeout destroyed the
-      # workload. Watched happen over noVNC on port-call-demo2, 2026-08-27. Fixed properly in
-      # patches/bot-capture-bridge.ts (hasSignedInProfile: look for `Local State`, not the folder),
-      # which reaches here only when these image tags are next bumped.
+      # Mounted at the path the bot actually tests, which only became safe with these tags. The
+      # old :agent1 image decided signed-in mode by existsSync on this directory, and Docker
+      # creates a mount point the moment a compose file declares the volume — so an instance with
+      # no profile read as signed in, stripped --incognito, skipped guest name-entry and stranded
+      # itself on Meet's "What's your name?" until the admission timeout destroyed the workload.
+      # Watched happen over noVNC on port-call-demo2, 2026-08-27; the workaround was to mount one
+      # level up so the path the bot tests did not exist.
       #
-      # One level up, the empty case is honest: no profile path exists, the bot joins as a guest,
-      # and open rooms work — which is everything a CVM without a profile could do anyway. The
-      # volume still holds whatever gets provisioned into it later; pointing the bot at it then
-      # needs the rebuilt image (or VEXA_PROFILE_DIR, which nothing has exercised yet).
-      - google-session:/var/lib/vexa/google-session
+      # hasSignedInProfile (patches/bot-capture-bridge.ts) tests for `Local State`, the file only a
+      # real Chromium user-data-dir has, so an empty volume is now honest by itself: guest join,
+      # open rooms work. Keeping the mount one level up would be worse than useless here — a
+      # profile provisioned into the volume would sit somewhere the bot never looks.
+      - google-session:/var/lib/vexa/google-session-live
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"
