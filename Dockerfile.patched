@@ -103,3 +103,23 @@ RUN grep -q "_forward_admin" /app/gateway/src/gateway/app.py \
  && grep -q "LLMS_TXT" /app/gateway/src/gateway/app.py \
  && /opt/venvs/gateway/bin/python -c "import ast,sys; ast.parse(open('/app/gateway/src/gateway/app.py').read())" \
  || (echo "gateway admin passthrough missing or unparseable" && exit 1)
+
+# 5. A STALE X LOCK MUST NOT COST A RIG ITS DISPLAY. The upstream supervisor program is a bare
+#    `Xvfb :99 …`, and /tmp lives on the container's writable layer — so a RESTART (not a recreate)
+#    finds the previous run's /tmp/.X99-lock and Xvfb exits 1 with "Server is already active for
+#    display 99". supervisor's default is 3 tries in 6 seconds, then FATAL, and it never tries
+#    again. Every browser surface then fails identically: camera, skins, screen share, and the join
+#    itself, all reporting "Missing X server or $DISPLAY".
+#
+#    Cost of not having this, measured: rig 4's containers restarted 2026-08-27 16:09 UTC and had no
+#    display until 09:58 the next morning — 18 hours in which nothing was red anywhere, because
+#    nothing looked. The 05:00 daily rung is what finally said so, on its first scheduled run.
+#
+#    Clearing the lock is safe precisely where it fires: supervisor only starts this program at boot
+#    or after the process died, and in both cases any lock on disk is by definition stale.
+RUN sed -i 's|^command=Xvfb :99 |command=/bin/bash -c "rm -f /tmp/.X99-lock /tmp/.X11-unix/X99; exec Xvfb :99 |; s|-noreset$|-noreset"|' \
+      /etc/supervisor/conf.d/vexa.conf \
+ && grep -q 'rm -f /tmp/.X99-lock' /etc/supervisor/conf.d/vexa.conf \
+ && grep -q 'exec Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset"' \
+      /etc/supervisor/conf.d/vexa.conf \
+ || (echo "xvfb stale-lock guard did not apply — upstream changed the program line" && exit 1)
