@@ -50,12 +50,25 @@ write_index() {
     echo "h1{font-size:20px}table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:7px 10px;"
     echo "border-bottom:1px solid #26263a}a{color:#8ab4ff}.g{color:#7ce38b}.r{color:#ff7b72}code{color:#8a8aa0}</style>"
     echo "<h1>Port Call — daily rung</h1><p><code>bench + e2e, 05:00, staging rig. Newest first.</code></p>"
-    echo "<table><tr><th>when<th>rig<th>bench<th>e2e<th>evidence"
-    tac "$ARCHIVE/ledger.tsv" | while IFS=$'\t' read -r when rig bench score stamp; do
-      case "$bench" in *GREEN) bc=g ;; *) bc=r ;; esac
+    echo "<table><tr><th>when<th>rig<th>bench<th>room<th>e2e<th>evidence"
+    # Fields are read BY KEY, not by position: the room column was added 2026-08-28 and every row
+    # written before that has five fields where this loop now wants six. Positional reading would
+    # have silently shifted e2e into stamp and broken every evidence link in the history.
+    tac "$ARCHIVE/ledger.tsv" | while IFS=$'\t' read -r -a f; do
+      when=${f[0]}; rig=${f[1]}; bench=; room=; score=; stamp=
+      for x in "${f[@]:2}"; do
+        case "$x" in
+          bench=*) bench=${x#bench=} ;;
+          room=*)  room=${x#room=} ;;
+          e2e=*)   score=${x#e2e=} ;;
+          *)       stamp=$x ;;
+        esac
+      done
+      case "$bench" in GREEN) bc=g ;; *) bc=r ;; esac
       case "$score" in *"0 failed") ec=g ;; *) ec=r ;; esac
-      printf '<tr><td>%s<td>%s<td class=%s>%s<td class=%s>%s<td>' \
-        "$when" "$rig" "$bc" "${bench#bench=}" "$ec" "${score#e2e=}"
+      case "$room" in GREEN) rc=g ;; "") rc=; room="—" ;; *) rc=r ;; esac
+      printf '<tr><td>%s<td>%s<td class=%s>%s<td class=%s>%s<td class=%s>%s<td>' \
+        "$when" "$rig" "$bc" "$bench" "$rc" "$room" "$ec" "$score"
       [ -f "$ARCHIVE/$stamp/e2e/report.html" ] && printf '<a href="/daily/%s/e2e/report.html">report</a> · ' "$stamp"
       printf '<a href="/daily/%s/bench.log">bench.log</a> · <a href="/daily/%s/e2e.log">e2e.log</a>\n' "$stamp" "$stamp"
     done
@@ -74,6 +87,15 @@ echo "═══ DAILY — rig $RIG ($C), room $CODE, $STAMP ═══"
 [ $BR -eq 0 ] && BENCH=GREEN || BENCH=RED
 echo "bench $BENCH"
 
+# BEFORE e2e, not after: if the room stopped resolving, every assertion downstream fails in the
+# same shape as a sign-in wall or a dead display, and the run says "joining, then timeout" without
+# saying why. This names it. Its own failure is NOT fatal to the run — e2e is still the real
+# evidence, and a Meet wording change should not silently cancel the daily rung.
+docker cp "$D/probe/room-bench.mjs" "$C:/tmp/room-bench.mjs" >/dev/null
+docker exec "$C" sh -c "DISPLAY=:99 node /tmp/room-bench.mjs $CODE" >"$OUT/room.log" 2>&1; RR=$?
+[ $RR -eq 0 ] && ROOM=GREEN || ROOM=RED
+echo "room $ROOM — $(tail -2 "$OUT/room.log" | head -1)"
+
 # ART sends the recording and the screenshots into this run's directory rather than $RIGDIR/artifacts.
 RECORD=1 ART="$OUT/e2e" "$D/e2e.sh" "$CODE" >"$OUT/e2e.log" 2>&1; ER=$?
 # "---- 10 passed, 0 failed ----". Absent when e2e died before its first assertion (no token, no
@@ -82,8 +104,8 @@ SCORE=$(grep -oE '[0-9]+ passed, [0-9]+ failed' "$OUT/e2e.log" | tail -1)
 [ -n "$SCORE" ] || SCORE="died: $(tail -1 "$OUT/e2e.log" | cut -c1-90)"
 echo "e2e $SCORE"
 
-printf '%s\t%s\tbench=%s\te2e=%s\t%s\n' \
-  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "rig$RIG" "$BENCH" "$SCORE" "$STAMP" >>"$ARCHIVE/ledger.tsv"
+printf '%s\t%s\tbench=%s\troom=%s\te2e=%s\t%s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "rig$RIG" "$BENCH" "$ROOM" "$SCORE" "$STAMP" >>"$ARCHIVE/ledger.tsv"
 
 # 21 days, the retention backup.sh already uses for recordings of the same meetings.
 find "$ARCHIVE" -maxdepth 1 -type d -name '20*' -mtime +21 -exec rm -rf {} + 2>/dev/null
