@@ -22,10 +22,18 @@ Work is placed on the rung where its evidence lives.
 
 | Rung | Command | Needs | What it can prove |
 |---|---|---|---|
-| Bench | `./bench.sh` | nothing — no meeting, no bot, no human | canvas, capture, selector resolution against saved DOM |
+| Bench | `./bench.sh` | a RIG — no meeting, no bot, no human | canvas, capture, selector resolution against saved DOM |
 | E2E | `./e2e.sh` | a standing open lab room | join, transcribe, speak, chat, react, share — 10 checks, ~90s |
 | Journeys | `./journeys.sh` | a real room, sometimes a human | consent gates, populated-room audio, the paths e2e structurally cannot see |
 | Duel | `./duel.sh` | two rigs and the lab room | the closed audio loop, and what it costs — the only rung that can hear |
+
+**"Needs nothing" meant no HUMAN, and was read as no rig.** bench.sh makes fourteen
+`docker exec "$C"` calls into the rig's own running container, and builds the host-global
+`vexa-lite:bench` tag it then runs from — so two bench runs on one host race on that tag, and the
+DOM-fixture rung tests whichever build finished last. Every rung needs a rig. With rig 1 (Andrew's)
+and rig 4 (the 05:00 daily) excluded, **concurrency is two, not unlimited**, and that is the real
+ceiling on how many agents this repo can run at once. Found 2026-08-29 while designing the
+dispatcher, which had assumed otherwise.
 
 The bench rung is the one that makes agent work possible, and two pieces of it were built
 specifically to move evidence *down* a rung:
