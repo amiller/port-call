@@ -153,7 +153,7 @@ def near_notes(prompt):
         "    out.append((json.loads(ln[6:])['choices'][0].get('delta') or {}).get('content') or '')\n"
         "sys.stdout.write(''.join(out))\n" % (NEAR_MODEL, NEAR_MAX_TOKENS))
     return subprocess.run(
-        ["ssh", HOST, f"docker exec -i vexa-rig-near-shim-1 python3 -c {shlex.quote(script)}"],
+        ["ssh", HOST, f"docker exec -i vexa-rig{'' if RIG == '1' else RIG}-near-shim-1 python3 -c {shlex.quote(script)}"],
         input=prompt, stdout=subprocess.PIPE, text=True, check=True, timeout=4200).stdout
 
 
