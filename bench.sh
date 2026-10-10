@@ -74,6 +74,9 @@ docker exec "$C" node /tmp/rep/probe/repetition-tests.mjs || FAIL=1
 docker cp "$(dirname "$0")/probe/chat-guard-bench.mjs" "$C:/tmp/chat-guard-bench.mjs" >/dev/null
 docker exec "$C" node /tmp/chat-guard-bench.mjs | tail -1 || FAIL=1
 
+echo "== opt-out: the chat commands and what they keep out, pure logic =="
+node "$D/probe/optout-tests.mjs" | tail -1 || FAIL=1
+
 echo "== DOM fixture tests: selector ambiguity detection =="
 # This rung runs in a THROWAWAY container from the image rung 1 just built — not in $C, the
 # ambient rig. That distinction is the whole lesson of 2026-08-19: $C is a long-lived container

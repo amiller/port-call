@@ -17,8 +17,15 @@ if [ -z "${RIG:-}" ]; then
   esac
 fi
 [ "$RIG" = 1 ] && RIGSFX="" || RIGSFX="$RIG"
-C=${C:-vexa-rig$RIGSFX-vexa-lite-1}
-GW=${GW:-http://localhost:$((8055 + RIG))}
+# The container is named by compose from COMPOSE_PROJECT_NAME in .env, and the gateway port is
+# VEXA_GW_PORT there, so read the same file compose reads. A tree with no .env yet gets the
+# numbered-rig defaults above.
+_ENV="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.env"
+_PROJECT=; _GWPORT=
+[ ! -f "$_ENV" ] || _PROJECT=$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' "$_ENV" | tail -1)
+[ ! -f "$_ENV" ] || _GWPORT=$(sed -n 's/^VEXA_GW_PORT=//p' "$_ENV" | tail -1)
+C=${C:-${_PROJECT:-vexa-rig$RIGSFX}-vexa-lite-1}
+GW=${GW:-http://localhost:${_GWPORT:-$((8055 + RIG))}}
 RIGDIR=${RIGDIR:-$HOME/vexa-rig$RIGSFX}
 TOKBOT=/tmp/vexa$RIGSFX-bot-token.txt
 TOKTX=/tmp/vexa$RIGSFX-tx-token.txt

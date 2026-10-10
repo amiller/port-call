@@ -11,6 +11,8 @@ container with no bot code in it. Populate from the built image before the first
 ./populate-live.sh          # builds vexa-lite, docker cp's the four dirs out of it
 ```
 
+`./pc up` runs this itself when `live/` is empty, so a fresh clone only needs the one command.
+
 The edit loop: change a file in `patches/`, copy it to the matching path in `live/`, run
 `./hotswap.sh`. Keep the two in sync — if they drift, a from-scratch image build fails while the
 running system looks fine. The drift is the price of the ~10s loop; the image build (which CI

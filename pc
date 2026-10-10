@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# Port Call — the one command. Starts the stack, transcription on this machine, and the console;
+# sends the bot into a meeting; drives it.
+#
+#   ./pc up                      start everything, then open http://localhost:8090
+#   ./pc join <meet link|code>   send the bot into your meeting — admit it when it knocks
+#   ./pc say "hello"             any act: say chat read camera share unshare react
+#                                check shot log status transcript recam
+#   ./pc stop                    the bot leaves
+#   ./pc down                    stop the stack and the console
+#   ./pc doctor                  check this machine has what the stack needs, say what to install
+#   ./pc model [name]            show transcription models, or switch (downloads it if needed)
+#   ./pc bench                   the no-meeting test suite
+#   ./pc <script.sh> [args]      any other repo script, same environment
+#
+# First run: copies .env.example to .env, fills live/ from the built image (a few minutes), and
+# builds the Pipecat environment with uv, installing uv itself if the machine has none.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+usage() { sed -n '2,16p' "$0"; exit "${1:-0}"; }
+# A port is "up" if something accepts a connection. bash's /dev/tcp, so no netcat dependency.
+up_on() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+room() { [ -s .room ] || { echo "no meeting yet — run: ./pc join <meet link|code>" >&2; exit 1; }; cat .room; }
+
+# Docker: whichever engine answers. DOCKER_CONTEXT set by hand wins; then the CLI's current
+# context; then the engines a laptop commonly has, so a dead Docker Desktop with the stack
+# actually on OrbStack (or the reverse) does not read as "Docker is not running".
+engine() {
+  [ -n "${DOCKER_CONTEXT:-}" ] && return 0
+  docker info >/dev/null 2>&1 && return 0
+  local c
+  for c in orbstack desktop-linux colima default; do
+    if DOCKER_CONTEXT=$c docker info >/dev/null 2>&1; then export DOCKER_CONTEXT=$c; return 0; fi
+  done
+  return 1
+}
+
+ensure_env() {
+  [ -f .env ] && return 0
+  cp .env.example .env
+  echo ".env created from .env.example — the defaults run one bot with transcription on this machine."
+}
+
+ensure_live() {
+  [ -s live/services-bot-src/index.ts ] && return 0
+  echo "live/ is empty: building the bot image and filling it (first run only, a few minutes)…"
+  ./populate-live.sh
+}
+
+load_env() { ensure_env; set -a; . ./.env; set +a; }
+
+# uv manages the one Python environment this needs (Pipecat's). The official installer puts it in
+# ~/.local/bin, which a shell opened before the install does not have on PATH yet, so look there.
+UV_INSTALL='curl -LsSf https://astral.sh/uv/install.sh | sh'
+have_uv() { command -v uv >/dev/null 2>&1 && return 0; [ -x "$HOME/.local/bin/uv" ] && { export PATH="$HOME/.local/bin:$PATH"; return 0; }; return 1; }
+ensure_uv() {
+  have_uv && return 0
+  echo "uv (Python package manager) is not installed; installing it to ~/.local/bin:  $UV_INSTALL"
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  have_uv || { echo "uv did not install — https://docs.astral.sh/uv/getting-started/installation/" >&2; return 1; }
+}
+# Python 3.12 pinned: the version this lane has run on. uv fetches it if the machine has none.
+PIPECAT_INSTALL="uv venv --python 3.12 .venv-pipecat && uv pip install --python .venv-pipecat/bin/python 'pipecat-ai[websocket]==1.12.0' uvicorn"
+ensure_pipecat() {
+  [ -x .venv-pipecat/bin/python ] && return 0
+  ensure_uv
+  echo "building the Pipecat environment, .venv-pipecat (once):  $PIPECAT_INSTALL"
+  uv venv -q --python 3.12 .venv-pipecat && uv pip install -q --python .venv-pipecat/bin/python 'pipecat-ai[websocket]==1.12.0' uvicorn
+}
+
+# What this machine must have, each with the line that installs it. Exit 1 if anything is missing.
+doctor() {
+  local fail=0
+  pass() { printf '  ok    %s\n' "$1"; }
+  miss() { printf '  MISSING  %s\n         %s\n' "$1" "$2"; fail=1; }
+  echo "docker"
+  if engine; then pass "engine answers${DOCKER_CONTEXT:+ (context $DOCKER_CONTEXT)}"
+  else miss "no Docker engine answers" "start Docker Desktop, OrbStack or dockerd; or set DOCKER_CONTEXT to the context that works (docker context ls)"; fi
+  docker compose version >/dev/null 2>&1 && pass "docker compose" || miss "docker compose plugin" "comes with Docker Desktop and OrbStack; on Linux: apt install docker-compose-plugin"
+  echo "python"
+  if python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null; then pass "python3 $(python3 -V 2>&1 | cut -d' ' -f2)"
+  else miss "python3 3.10 or newer" "https://www.python.org/downloads/"; fi
+  echo "configuration"
+  if [ -f .env ]; then pass ".env"; else miss ".env" "cp .env.example .env   (./pc up does this for you)"; fi
+  [ -s live/services-bot-src/index.ts ] && pass "live/ populated" || miss "live/ (the bot code that runs)" "./populate-live.sh   (./pc up does this for you)"
+  echo "transcription"
+  set -a; [ -f .env ] && . ./.env; set +a
+  if [ -n "${TRANSCRIPTION_SERVICE_URL:-}" ] && [[ "${TRANSCRIPTION_SERVICE_URL}" == *host.docker.internal:8177* ]]; then
+    if command -v whisper-server >/dev/null; then pass "whisper-server ($(command -v whisper-server))"
+    else
+      case "$(uname -s)" in
+        Darwin) miss "whisper-server (whisper.cpp)" "brew install whisper-cpp" ;;
+        *) miss "whisper-server (whisper.cpp)" "git clone https://github.com/ggml-org/whisper.cpp && cd whisper.cpp && cmake -B build && cmake --build build -j && sudo cp build/bin/whisper-server /usr/local/bin/" ;;
+      esac
+    fi
+  else
+    pass "transcription is not on this machine (TRANSCRIPTION_SERVICE_URL=${TRANSCRIPTION_SERVICE_URL:-unset})"
+  fi
+  if [ -n "${PIPECAT_URL:-}" ]; then
+    have_uv && pass "uv ($(command -v uv))" || miss "uv (Python package manager)" "$UV_INSTALL   (./pc up does this for you)"
+    if [ -x .venv-pipecat/bin/python ]; then pass "Pipecat venv (.venv-pipecat)"
+    else miss "Pipecat venv (PIPECAT_URL is set)" "$PIPECAT_INSTALL   (./pc up does this for you; or comment PIPECAT_URL out of .env)"; fi
+  fi
+  echo "ports (free, or already ours)"
+  local p
+  for p in 8090 8177 8179 "${VEXA_GW_PORT:-8056}" "${VEXA_VNC_PORT:-6080}"; do
+    up_on "$p" && printf '  in use  %s\n' "$p" || pass "$p free"
+  done
+  return $fail
+}
+
+case "${1:-}" in
+  ""|-h|--help|help) usage ;;
+  doctor) doctor ;;
+  up)
+    engine || { echo "no Docker engine answers — ./pc doctor" >&2; exit 1; }
+    load_env
+    ensure_live
+    # Started by port, not by process name: a name match also hits any shell whose command line
+    # merely mentions the script, and then nothing gets started.
+    if [[ "${TRANSCRIPTION_SERVICE_URL:-}" == *host.docker.internal:8177* ]]; then
+      command -v whisper-server >/dev/null || { echo "whisper-server is not installed — ./pc doctor says how" >&2; exit 1; }
+      up_on 8177 || { nohup python3 stt_local.py serve >/tmp/port-call-stt.log 2>&1 & echo "transcription -> :8177"; }
+    fi
+    # The Pipecat lane, when .env selects it. Its environment is built once: see pipecat_local.py.
+    if [ -n "${PIPECAT_URL:-}" ]; then
+      ensure_pipecat
+      up_on 8179 || { nohup .venv-pipecat/bin/python pipecat_local.py >/tmp/port-call-pipecat.log 2>&1 & echo "pipecat -> :8179"; }
+    fi
+    ./relaunch.sh
+    # relaunch.sh may have just launched the console; give it a moment to bind before deciding.
+    for _ in 1 2 3 4 5 6; do up_on 8090 && break; sleep 0.5; done
+    up_on 8090 || { nohup python3 board.py >/tmp/port-call-board.log 2>&1 & echo "console -> :8090"; }
+    echo "console -> http://localhost:8090   bot desktop -> http://localhost:${VEXA_VNC_PORT:-6080}/vnc.html" ;;
+  down)
+    engine || true
+    pkill -f "python3 board.py" 2>/dev/null || true
+    pkill -f "stt_local.py serve" 2>/dev/null || true
+    pkill -f "pipecat_local.py" 2>/dev/null || true
+    docker compose stop ;;
+  join)
+    engine || { echo "no Docker engine answers — ./pc doctor" >&2; exit 1; }
+    load_env
+    code=$(grep -oE '[a-z]{3}-[a-z]{4}-[a-z]{3}' <<<"${2:-}" | head -1 || true)
+    [ -n "$code" ] || { echo "usage: ./pc join <meet link|code>   e.g. ./pc join abc-defg-hij" >&2; exit 1; }
+    echo "$code" > .room
+    ROOM=$code ./demo.sh join ;;
+  bench) engine || true; load_env; ./bench.sh ;;
+  model) if [ -n "${2:-}" ]; then python3 stt_local.py use "$2"; else python3 stt_local.py status; fi ;;
+  *.sh|*.py) engine || true; load_env; s=$1; shift; "./$s" "$@" ;;
+  *) engine || true; load_env; r=$(room); ROOM=$r ./demo.sh "$@" ;;
+esac

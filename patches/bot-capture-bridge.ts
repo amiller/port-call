@@ -419,6 +419,50 @@ export function createSpeakController(page: Page, inv: Invocation): SpeakControl
     return `already unmuted ("${label}")`;
   });
 
+  // Meet's own "Noise cancellation" (Settings > Audio) is ON by default for the bot, and Meet's
+  // description of it is exact: "Filters out sound from your mic that isn't speech". Every sound
+  // effect is sound that isn't speech. Measured 2026-10-07: the effects reached tts_sink at full
+  // level, Chrome's own echo/noise/gain processing cost them only 1-2 dB (probed in a throwaway
+  // container), and the switch read aria-checked=true in a live call where the host heard speech
+  // but no effects. The setting is per session and every join is a fresh incognito profile, so
+  // it has to be switched off on every join; the bot's mic is a digital sink with no room noise
+  // behind it, so nothing is lost by doing so.
+  //
+  // Real pointer clicks through locators, as camera.ts does, and selectors read from a live dump
+  // (selfcheck's buttons / menuitems / switches) rather than guessed:
+  //   button[aria-label="More options"]
+  //   li[role=menuitem] whose text is "settingsSettings" (icon ligature + label, no aria-label)
+  //   [role=switch][aria-label="Noise cancellation"], state in aria-checked
+  //   button[aria-label="Close dialog"]
+  // Once per bot, on its first utterance, and tried again on the next one if it did not finish.
+  // The dialog is always closed on the way out: left open it overlays the toolbar, and every
+  // later act hangs on Playwright's actionability check with no error.
+  let noiseCancellationOff = false;
+  const ensureNoiseCancellationOff = async (): Promise<string> => {
+    const sw = page.locator('[role="switch"][aria-label="Noise cancellation"]').first();
+    try {
+      await page.mouse.move(640, 360).catch(() => {});      // the toolbar hides without pointer movement
+      await page.mouse.move(900, 700).catch(() => {});
+      await page.locator('button[aria-label="More options"]').first().click({ timeout: 8_000 });
+      await page.locator('[role="menuitem"]', { hasText: 'Settings' }).first().click({ timeout: 5_000 });
+      await sw.waitFor({ state: 'visible', timeout: 5_000 });
+      const was = await sw.getAttribute('aria-checked');
+      if (was === 'true') await sw.click({ timeout: 5_000 });
+      const now = await sw.getAttribute('aria-checked');
+      noiseCancellationOff = now === 'false';
+      if (!noiseCancellationOff) return `STILL ON (aria-checked=${now})`;
+      return was === 'true' ? 'turned off (was on)' : 'already off';
+    } catch (e) {
+      return `could not reach the switch: ${String((e as Error)?.message ?? e).split('\n')[0]}`;
+    } finally {
+      await page.locator('button[aria-label="Close dialog"]').first().click({ timeout: 3_000 }).catch(() => {});
+      // Only if the menu is what was left open: a bare Escape would also close an open chat panel.
+      if (await page.locator('[role="menuitem"]').first().isVisible().catch(() => false)) {
+        await page.keyboard.press('Escape').catch(() => {});
+      }
+    }
+  };
+
   return {
     async speak(text: string, voice?: string): Promise<void> {
       if (!enabled) { console.error('[bot] speak ignored: voiceAgentEnabled is false'); return; }
@@ -433,6 +477,7 @@ export function createSpeakController(page: Page, inv: Invocation): SpeakControl
 
       console.log(`[bot] speak: "${text.slice(0, 60)}"`);
       console.log(`[bot] mic: ${await ensureUnmuted()}`);
+      if (!noiseCancellationOff) console.log(`[bot] noise cancellation: ${await ensureNoiseCancellationOff()}`);
 
       // Signal winding-up state (throat-clearing) before TTS flows
       await page.evaluate(() => (globalThis as any).__vexaCam?.hud({ windingUp: true }))

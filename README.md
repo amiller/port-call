@@ -1,141 +1,157 @@
-# Port Call — an interactive Google Meet participant, built on Vexa
+# Port Call
 
-A proof of concept that turns [Vexa](https://github.com/Vexa-ai/vexa) (Apache-2.0) from a
-*transcription* bot into a bot that **acts in the meeting**: it speaks, posts and reads chat, sends
-emoji reactions, publishes a live video feed it draws itself, and shares a screen — all driven by
-one `redis PUBLISH`.
+**A Google Meet participant you control from your laptop.** It joins your meeting, transcribes who
+said what, and acts in the call: it speaks in its own voice, plays sound effects, posts and reads
+chat, sends reactions, and shows a live animated tile as its camera. Everything runs on your
+machine; the only thing it talks to is Google Meet.
 
-Everything here was measured against real Google Meet, not inferred. The failure notes are the
-point: most of the work was discovering *why* the obvious approach silently does nothing — they
-live in **[docs/findings.md](docs/findings.md)**.
+Built on [Vexa](https://github.com/Vexa-ai/vexa) (Apache-2.0), which handles joining and audio
+capture. Port Call adds the acting, the console, local transcription, and a long list of
+[things that only work once you know why the obvious way doesn't](docs/findings.md).
 
-```
-./e2e.sh                        # 10 checks against a real meeting, unattended, ~90s
-./bench.sh                      # 8 checks with no meeting, no bot, no human, ~40s
-./hotswap.sh                    # ~3s: edit TypeScript, next act runs it, bot keeps its seat
-./demo.sh join                  # a long-lived bot you iterate against
-```
+<p align="center">
+  <img src="docs/assets/port-call-console.jpeg" alt="The Port Call console during a call: on the left, a timeline of what people said and what the bot did, each name in its own colour; on the right, the bot's animated tile with a picker of characters and backgrounds; along the bottom, a box to make the bot speak, sound-effect buttons, a chat box, and emoji reactions." width="100%">
+</p>
 
----
+<p align="center"><em>The console in a call. Left: the room's words and the bot's deeds, one timeline. Right: the tile the bot shows as its camera. Bottom: the strings.</em></p>
 
-## What works
+## What it does
 
-| Surface | How | Verified |
-|---|---|---|
-| Join | Vexa's join layer, headless Chromium | ✅ real Meet |
-| Transcribe | Vexa pipeline → Whisper (we ran it against a **TEE** endpoint) | ✅ speaker-attributed |
-| Speak | TTS shim → PulseAudio null sink → the bot's mic | ✅ |
-| Sound effects | `!airhorn` in the speak text returns a wav instead of speech — **no bot-side code** | ✅ |
-| Chat send / read | Meet's chat panel, driven by Playwright | ✅ |
-| Emoji reactions | Meet's reaction picker | ✅ |
-| Camera | canvas → `getUserMedia` patch → a live HUD + animated avatar | ✅ |
-| Screenshare | the same canvas → `getDisplayMedia` patch | ✅ presenting confirmed in DOM |
+| In the call | How |
+|---|---|
+| Joins as a participant | knocks like a guest; you admit it |
+| Transcribes, with speaker names | Whisper on your machine; names from whose tile is lit |
+| Speaks | type a line, the bot says it aloud |
+| Sound effects | `!airhorn`, `!gavel`, `!ding`, `!objection`, or drop your own `.wav` in `shims/sfx/` |
+| Chat | posts to the meeting chat and reads it |
+| Reactions | 👍 🎉 💖 👏 😂 😮 through Meet's own picker |
+| Camera | a character (rooster, cat, alien, dolphin, …) over a background (live captions, pipeline numbers, the room's words in orbit), drawn live |
+| Presents | shares that same tile as a screen |
+| Opt-out | anyone can type `opt-out` in the chat and their words stop being transcribed; `opt-out 2` keeps their name out too; `opt-in` undoes it |
 
-The camera is a **selectable character over a selectable background** — three of each, independent,
-so any avatar goes on any background:
+Everything the tile shows is derived from what is really happening: the "listening" animation
+follows transcript recency, the beak opens on the actual level of the voice audio. It cannot look
+healthy when the pipeline isn't.
+
+## Quick start
+
+You need **Docker** (Docker Desktop, OrbStack, or Docker Engine), **Python 3.10+**, and
+**whisper.cpp** for transcription on your machine (`brew install whisper-cpp` on macOS; elsewhere
+build [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and put `whisper-server` on your
+PATH). The Python environment for the audio lane is built for you with
+[uv](https://docs.astral.sh/uv/), which `./pc up` installs if you don't have it. Windows works
+through WSL.
 
 ```bash
-./demo.sh camera "ON AIR"                      # unchanged: keeps whatever is set
-./demo.sh camera "ON AIR" tina brainrot        # avatar, background
-./demo.sh camera "STATUS" rooster vitals
+git clone https://github.com/amiller/port-call.git && cd port-call
+./pc doctor         # says what is missing and how to install it
+./pc up             # first run: copies .env.example to .env, builds the bot image (a few minutes)
 ```
 
-| Background | What it is for |
+Then open **http://localhost:8090**, paste a Meet link, press **Join**. The bot knocks; admit it
+in Meet like any guest. From that moment the timeline fills, and the dock at the bottom is yours.
+
+The same things from a terminal:
+
+```bash
+./pc join https://meet.google.com/abc-defg-hij
+./pc say "Hello everyone"
+./pc say "!gavel"
+./pc chat "Hi from the bot"
+./pc camera "ON AIR" alien brainrot      # headline, character, background
+./pc react 🎉
+./pc stop
+./pc down                                # stop the stack
+```
+
+### Which meetings it can join
+
+As shipped, the bot joins as a **guest**, which works for any meeting whose host admits guests,
+and for open rooms. **Calendared meetings on personal Google accounts wall out guests** behind a
+sign-in; for those the bot needs a Google account of its own, signed in once by hand through the
+noVNC view of its desktop. What that involves, and what must never leave your machine, is in
+[docs/credentials.md](docs/credentials.md).
+
+### Where the data goes
+
+Nowhere. The stack binds to `127.0.0.1` only. Transcription is Whisper on your machine, the voice
+is Piper inside a container, transcripts sit in a Postgres container, and the console has no login
+because nothing outside your laptop can reach it. Google sees a participant, the same as any
+attendee. The one cloud option, transcription through near.ai, is off unless you turn it on in
+`.env`, and `.env.example` says what leaves the machine when you do.
+
+## Configuration
+
+All of it is in `.env`, copied from [`.env.example`](.env.example) on the first `./pc up`.
+
+| Setting | What it is |
 |---|---|
-| `transcript` | the live caption strip — proves the pipeline is flowing |
-| `vitals` | segments, segments/min, seconds since the last one, outbound audio level |
-| `brainrot` | the entertaining one: recent transcript words thrown around the frame |
+| `OWNER_NAME`, `OWNER_EMAIL` | the account the stack mints tokens for; transcripts belong to it |
+| `COMPOSE_PROJECT_NAME` | names the containers and volumes; pick once |
+| `VEXA_GW_PORT`, `VEXA_UI_PORT`, `VEXA_VNC_PORT` | host ports (loopback only) |
+| `TRANSCRIPTION_SERVICE_URL` | Whisper on your machine by default; any OpenAI-compatible `/v1/audio/transcriptions` works |
+| `PIPECAT_URL` | utterance cutting and end-of-turn detection on your machine; comment out for the bot's built-in lane |
+| `NEAR_API_KEY`, `COMPOSE_PROFILES=transcribe` | the cloud alternative; audio leaves the machine |
+| `RECORDING_ENABLED` | off; there is no store wired for recordings yet |
+| `TTS_ENGINE` | `piper` (natural) or `espeak` (robotic, no dependencies) |
 
-Every animated thing is *derived* rather than commanded — the "listening" animation follows
-transcript recency, the beak opens on the actual RMS of the TTS audio, and the brainrot box calms
-down when the room goes quiet. The face cannot claim the pipeline is healthy when it isn't, and
-`bench.sh` asserts that: nine avatar×background combinations must render *distinguishable* frames,
-and a background that looked the same busy as idle would fail.
+`./pc model` lists Whisper models and switches between them; the console offers the same dropdown.
 
----
-
-## Architecture
+## How it works
 
 ```
-redis  acts.v1  ──►  bot process (Node/TS, one per meeting)  ──►  Playwright Page ──► Google Meet
-                        │  speak → PulseAudio null sink → virtual mic
-                        │  camera/share → canvas → patched getUserMedia/getDisplayMedia
-                        │  chat/reactions → Meet DOM
-                        ▼
-redis  transcript.v1  ◄── Whisper (TEE endpoint)
+console (board.py :8090)  ──►  gateway :8056  ──►  bot process (Node, one per meeting)  ──►  Chromium ──► Google Meet
+                                                     │  speak → TTS → PulseAudio null sink → the bot's mic
+                                                     │  camera / present → canvas → patched getUserMedia / getDisplayMedia
+                                                     │  chat / reactions / opt-out → Meet's DOM
+                                                     ▼
+                              transcripts  ◄──  Pipecat (utterances, turns)  ◄──  Whisper on your machine
 ```
 
-The bot process owns join + capture + speak + chat + camera + share for exactly one reason: it
-holds the **Playwright `Page` handle**, a live pipe to one Chromium. Anything touching that DOM
-must run in that process. Nothing else is coupled — **acts in / transcripts out, both over redis**,
-so the "brain" can live anywhere, in any language.
+One bot process per meeting owns the browser, so everything that touches Meet's page lives there.
+Everything else is decoupled: acts go in over redis, transcripts come out over redis, and the
+console is one page that reads the bot's own log, so it cannot report a sound that never played.
 
-**Hot swap.** Surface controllers are `import()`ed fresh per act, keyed on file mtime, so a
-recompile lands on the next act with the bot still in the meeting. Only the composition root
-(`index.ts`) needs a respawn.
-
----
-
-## Setup
-
-1. **A Google Cloud project you control.** Enable the Meet API on it:
-   `https://console.cloud.google.com/apis/library/meet.googleapis.com?project=YOUR_PROJECT`
-2. **A desktop OAuth client** (`http://localhost` redirect). Point `LAB_CLIENT_SECRETS` at its JSON.
-3. `python3 -u lab-room.py auth` → approve → `python3 lab-room.py create` prints a permanent open
-   room code. Put it in `e2e.sh` as the default.
-4. `./populate-live.sh` — fills the `live/` bind-mount dirs from the built image. A fresh clone has
-   none, and compose would mount empty dirs over the bot's source.
-5. `NEAR_API_KEY=… docker compose up -d --build` (the shims need a transcription endpoint).
-6. `./e2e.sh` — it should print 10 passes.
-
-That gets you guest joins to open rooms. Joining **calendared personal-account meetings** needs a
-signed-in Google identity for the bot, and the calendar Join list needs its own laptop-side OAuth —
-the four credential tiers, what each unlocks, and what can never ship are in
-**[docs/credentials.md](docs/credentials.md)**.
+The bot's source lives in `patches/` and is applied over upstream Vexa at image build. The copy
+that runs is bind-mounted from `live/`, so an edit followed by `./hotswap.sh` lands on the next
+act in about ten seconds, with the bot still in the call.
 
 ## Developing and testing
 
-Day-to-day development is a ~10s hot-swap loop against a live bot, backed by a three-rung test
-ladder (`bench.sh` with no meeting → `e2e.sh` against real Meet → `journeys.sh` for the paths e2e
-can't see). How `live/` gets populated on a fresh clone, the `patches/`↔`live/` sync discipline,
-hot-swap semantics, and the mock-from-a-dump testing rules are in **[docs/dev.md](docs/dev.md)**.
+```bash
+./pc bench          # everything that needs no meeting: image build, audio, camera, surfaces vs a Meet-shaped DOM
+./e2e.sh <code>     # the same surfaces against a real, open Meet room, unattended
+./hotswap.sh        # recompile the bot in place; the next act runs the new code
+```
 
-Most of this repo was written by agents, which is only possible because of a specific rule about
-what they may be assigned: work whose success condition the agent can observe without a meeting.
-That rule, the three rungs it produced, and an honest account of what is *not* automated are in
-**[docs/swarm.md](docs/swarm.md)**.
+The edit loop, the `patches/` ↔ `live/` discipline, hot-swap semantics, and the rule that a mock
+is built from a dump of real Meet and never from assumption are in [docs/dev.md](docs/dev.md).
+Running `e2e.sh` needs a permanent open room, which `lab-room.py` mints through the Meet API with a
+Google Cloud project of yours; that is only for the test ladder, not for using the bot.
 
-## Where this is going
+Most of this repo was written by agents, under one rule about what they may be assigned: work
+whose success the agent can observe without a meeting. [docs/swarm.md](docs/swarm.md) is the
+honest account of what that produced and what is still done by hand.
 
-**[docs/roadmap.md](docs/roadmap.md)** — the short version: the camera tile becomes a selectable
-background × selectable avatar instead of one hardcoded rooster over a transcript strip; the bot
-gets a visible wind-up before it speaks and stops repeating itself; and the whole thing aims at
-being a meeting *facilitator* rather than a novelty. Open work is in
-[issues](https://github.com/amiller/vexa-poc/issues).
+## The documents
 
-## Where it runs
-
-fractal and zed today, and it is written to run in a CVM — every shim is a service rather than
-something on the host, because a confidential VM has no host to put files on. How far that goes,
-what the Phala/dstack answer actually is, and what someone else needs to stand this up are in
-**[docs/operations.md](docs/operations.md)**.
+- [docs/findings.md](docs/findings.md) — what real Meet does that the obvious approach doesn't survive
+- [docs/credentials.md](docs/credentials.md) — the bot's Google account, and what never ships
+- [docs/dev.md](docs/dev.md) — the edit loop and the test ladder
+- [docs/operations.md](docs/operations.md) — running it somewhere other than a laptop, including a confidential VM
+- [docs/roadmap.md](docs/roadmap.md) — where this is going; open work is in [issues](https://github.com/amiller/port-call/issues)
 
 ## Known gaps
 
-- An external **observer** (a second automated participant, for verifying what the bot can't see
-  about itself) is blocked by Google's "You can't join this video call" interstitial. Four launch
-  strategies were tried; the bot itself joins the same room fine.
-- Transcription can't self-prove in an empty room — `segments=0` passes legitimately.
-- Avatar/HUD changes need a respawn: re-injection builds a new canvas, but Meet keeps publishing
-  the track it already acquired.
+- A second automated participant, to verify what the bot cannot see about itself, is blocked by
+  Google's "You can't join this video call" interstitial.
+- Transcription cannot prove itself in an empty room: zero segments is a legitimate pass.
+- A new camera character or background needs a fresh bot: Meet keeps publishing the video track
+  it first acquired.
+- Opting out cuts a person's words at publish; Whisper still hears them. Words spoken before the
+  opt-out stay.
 
 ## License and attribution
 
-This repository contains **modified files from [Vexa](https://github.com/Vexa-ai/vexa)**, which is
-Apache-2.0. Those modifications live in `patches/` and are offered under the same license; see
-`NOTICE` for what was changed. The harness, shims, and documentation are original work under
-Apache-2.0.
-
-This is a **proof of concept**, not a product. It automates a Google Meet UI that Google does not
-offer an API for; expect it to break when that UI changes, and don't deploy a bot into anyone's
-meeting without their knowledge.
+Apache-2.0. Vexa is Apache-2.0 and is used here as a base image with patches; see
+[NOTICE](NOTICE).

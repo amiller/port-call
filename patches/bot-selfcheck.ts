@@ -50,6 +50,15 @@ export function createSelfCheck(page: Page): SelfCheck {
           .filter((b: any) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
           .map((b: any) => (b.getAttribute('aria-label') || b.textContent || '').trim().slice(0, 60))
           .filter((s: string) => s);
+        // Toggle switches WITH their state. A button's aria-label says a switch exists, not whether
+        // it is on — and Settings > Audio > "Noise cancellation" being on is what strips sound
+        // effects out of the bot's mic, so its state has to be readable, not assumed.
+        out.switches = Array.from(doc.querySelectorAll('[role="switch"]'))
+          .map((e: any) => `${(e.getAttribute('aria-label') || e.textContent || '?').trim().slice(0, 60)}=${e.getAttribute('aria-checked')}`);
+        // Entries of whichever menu is open (More options > Settings is the way to those switches).
+        out.menuitems = Array.from(doc.querySelectorAll('[role^="menuitem"]'))
+          .filter((e: any) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
+          .map((e: any) => `${e.tagName.toLowerCase()}[role=${e.getAttribute('role')}] label="${e.getAttribute('aria-label') || ''}" text="${(e.textContent || '').trim().slice(0, 50)}"`);
         // Text-entry targets, for the same reason as buttons: write selectors from a live dump.
         out.inputs = Array.from(doc.querySelectorAll('textarea,input,[contenteditable="true"]'))
           .filter((b: any) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
@@ -79,6 +88,8 @@ export function createSelfCheck(page: Page): SelfCheck {
         hud: b.hud,
         participantTiles: b.participantTiles,
         buttons: b.buttons,
+        switches: b.switches,
+        menuitems: b.menuitems,
         inputs: b.inputs,
         chatNodes: b.chatNodes,
         chat: b.chat,

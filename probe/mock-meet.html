@@ -78,24 +78,35 @@
 
   $('#chatbtn').onclick = () => $('#chat').classList.toggle('open');
 
-  // 2. Chat messages: content in ATTRIBUTES, hover UI nested inside (pollutes textContent).
+  // 2. Chat messages, in the shape REAL Meet has (read off a live call 2026-10-09): a run of
+  // messages from one person sits in a GROUP whose header is a sibling of the rows, "Name 6:04 PM",
+  // and for your own messages the header is the time alone. No data-sender-name anywhere. Each
+  // row is div[data-message-id] with a bare text node, NOT a data-message-text attribute, and the
+  // hover UI is a nested BUTTON that also carries data-message-id (pollutes textContent).
+  let lastGroup = null;
   const post = (sender, text) => {
+    const stamp = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    if (!lastGroup || lastGroup._sender !== sender) {
+      lastGroup = document.createElement('div');
+      lastGroup._sender = sender;
+      const head = document.createElement('div');
+      head.innerHTML = (sender ? '<span>' + sender + '</span>' : '') + '<span>' + stamp + '</span>';
+      lastGroup.appendChild(head);
+      $('#msgs').appendChild(lastGroup);
+    }
     const d = document.createElement('div');
     d.className = 'msg';
     d.setAttribute('data-message-id', 'm' + Date.now() + Math.random());
-    d.setAttribute('data-sender-name', sender);
-    // REAL Meet shape: the text is a bare node inside the container, NOT a data-message-text
-    // attribute, and the hover UI is a nested BUTTON that also carries data-message-id.
     d.appendChild(document.createTextNode(text));
     const keep = document.createElement('button');
     keep.setAttribute('data-message-id', d.getAttribute('data-message-id'));
     keep.textContent = 'Hover over a message to pin itkeepPin message';
     d.appendChild(keep);
-    $('#msgs').appendChild(d);
+    lastGroup.appendChild(d);
   };
   const submit = () => {
     const ta = $('textarea');
-    if (ta.value.trim()) { post('Vexa E2E', ta.value.trim()); ta.value = ''; }
+    if (ta.value.trim()) { post('', ta.value.trim()); ta.value = ''; }   // own: time-only header
   };
   $('#send').onclick = submit;
   $('textarea').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } });

@@ -24,7 +24,8 @@
 # recam` to re-inject it without rejoining.
 set -euo pipefail
 . "$(dirname "$0")/rig-env.sh"   # RIG selects the rig; see rig-env.sh
-ROOM=${ROOM:-tog-tccc-szk}
+ROOM=${ROOM:-}
+[ -n "$ROOM" ] || [ "${1:-}" != join ] || { echo "ROOM is not set — ./pc join <meet link|code>, or ROOM=abc-defg-hij ./demo.sh join" >&2; exit 1; }
 STATE=/tmp/vexa-demo-bot
 BOT=$(cat "$TOKBOT")
 pub() { docker exec "$C" redis-cli PUBLISH "bot_commands:meeting:$(cat $STATE)" "$1" >/dev/null && echo "-> $1"; }

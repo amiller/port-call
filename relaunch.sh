@@ -10,7 +10,13 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 . "$(dirname "$0")/rig-env.sh"   # RIG selects the rig; see rig-env.sh
+# .env is the configuration (see .env.example); compose reads it itself, this script needs it too.
+if [ -f .env ]; then set -a; . ./.env; set +a; fi
 ADMIN=${ADMIN_TOKEN:-devadmintoken123}
+# The owner account: tokens are minted for it and transcripts belong to it, so it is a setting
+# (.env OWNER_NAME / OWNER_EMAIL), not a name baked in here. It used to be the author's.
+OWNER_NAME=${OWNER_NAME:-Owner}
+OWNER_EMAIL=${OWNER_EMAIL:-owner@port-call.local}
 # NEAR_API_KEY comes from ./.env, which docker compose reads natively. The old line sourced it
 # from ~/projects/ic3camp-teexai/... which exists on ONE machine and not this one — with set -e
 # that aborted recovery at line 14, so every reboot left the rig tokenless and the console down.
@@ -26,7 +32,7 @@ until adminapi -f -o /dev/null http://127.0.0.1:8001/health; do sleep 2; done
 for _ in $(seq 1 30); do
   UID_=$(adminapi -X POST http://127.0.0.1:8001/admin/users -H "X-Admin-API-Key: $ADMIN" \
     -H "Content-Type: application/json" \
-    -d '{"email":"andrew@teleport.computer","name":"Andrew","max_concurrent_bots":2}' \
+    -d "{\"email\":\"$OWNER_EMAIL\",\"name\":\"$OWNER_NAME\",\"max_concurrent_bots\":2}" \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])" 2>/dev/null) && break
   sleep 4
 done

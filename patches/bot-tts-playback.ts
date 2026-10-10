@@ -82,17 +82,22 @@ export interface TtsPlayback {
 
 /** Build a TtsPlayback that streams the TTS service's PCM straight to paplay. */
 export function createTtsPlayback(log: (m: string) => void = () => { /* */ }): TtsPlayback {
-  let proc: ChildProcess | null = null;
+  // Every paplay currently playing, not just the latest. Utterances overlap in practice — a sound
+  // effect pressed while the bot is mid-sentence — and tts_sink is ONE gate shared by all of them.
+  // With a single `proc`, whichever finished first re-muted the sink under the others: measured
+  // 2026-10-07, a "!ding" started 2.5s into a 10.5s sentence ended at 4.6s and the remaining 5.9s
+  // of speech played into a muted sink. The gate now closes only when the last one has ended.
+  const playing = new Set<ChildProcess>();
   let ampCallback: TtsAmplitudeCallback | null = null;
   const tickers = new Set<NodeJS.Timeout>();
 
   const stopTickers = (): void => { tickers.forEach(clearInterval); tickers.clear(); };
 
   const stop = (): void => {
-    if (proc) {
-      try { proc.stdin?.destroy(); proc.kill('SIGKILL'); } catch { /* */ }
-      proc = null;
+    for (const p of playing) {
+      try { p.stdin?.destroy(); p.kill('SIGKILL'); } catch { /* */ }
     }
+    playing.clear();
     stopTickers();
     setTtsMute(true, log);
   };
@@ -131,9 +136,18 @@ export function createTtsPlayback(log: (m: string) => void = () => { /* */ }): T
         ensureAudioGraph(log);                        // #49: the sink can vanish mid-run
         setTtsMute(false, log);                       // open the mic only during playback
         const p = spawn('paplay', PAPLAY_ARGS, { stdio: ['pipe', 'pipe', 'pipe'] });
-        proc = p;
+        playing.add(p);
         p.stderr?.on('data', (d: Buffer) => log(`[tts] paplay: ${d.toString().trim()}`));
-        const done = () => { if (proc === p) proc = null; stopTickers(); setTtsMute(true, log); resolve(); };
+        let ticker: NodeJS.Timeout | null = null;
+        let finished = false;                         // exit, error and a dead pipe can all report
+        const done = () => {
+          if (finished) return;
+          finished = true;
+          playing.delete(p);
+          if (ticker) { clearInterval(ticker); tickers.delete(ticker); }   // this utterance's only
+          if (playing.size === 0) setTtsMute(true, log);                   // last one out shuts the gate
+          resolve();
+        };
         p.on('exit', done);
         p.on('error', (e) => { log(`[tts] paplay error: ${String(e)}`); done(); });
 
@@ -170,7 +184,7 @@ export function createTtsPlayback(log: (m: string) => void = () => { /* */ }): T
         // once synthesis is DONE — startedAt is therefore the first sample paplay consumes, and
         // synth_ms is the dead air between the act and any sound at all.
         log(`[tts] audible ts=${startedAt} synth_ms=${startedAt - beganAt}`);
-        const ticker = setInterval(() => {
+        ticker = setInterval(() => {
           if (!ampCallback) return;
           const frame = Math.floor((Date.now() - startedAt) / FRAME_MS);
           ampCallback(envelope[frame] ?? 0);

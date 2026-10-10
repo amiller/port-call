@@ -48,6 +48,15 @@ export function installHud(): void {
     for (let i = 0; i < x.length; i++) h = (h * 31 + x.charCodeAt(i)) | 0;
     return h;
   };
+  // Each person's name has one colour, the same on this tile and in the console, which is why it
+  // is a function of the name alone: the two never compare notes, so nothing stateful (first
+  // come, first colour) could agree across them. Twelve hues, neighbours in the list far apart
+  // on the wheel, at one lightness so every one reads on the dark tile. The console carries a
+  // copy for the moments before this module has loaded there, and prefers this one after.
+  const SPEAKER_HUES = [130, 215, 330, 48, 185, 270, 95, 20, 300, 160, 240, 0];
+  const speakerColor = (name: any, alpha: any = 1) =>
+    'hsla(' + SPEAKER_HUES[Math.abs(hashStr(String(name || '').trim().toLowerCase())) % SPEAKER_HUES.length]
+    + ',65%,70%,' + alpha + ')';
   // Wrap/clip by MEASURED width against the visible band, not by character count. A character
   // budget tuned for the full 1280 canvas draws past the crop and is never seen: the 56px caption
   // wrapped at 30 chars (~930px) into a 560px band. Fixed 2026-08-21, after SAFE_W had already
@@ -384,6 +393,350 @@ export function installHud(): void {
     ctx.restore();
   };
 
+  // Cat — an orange tabby, front on, in the rooster's flat style. Each cat cue hangs off a real
+  // signal, like everything else here: the pupils widen and the ears lift while it is LISTENING
+  // (transcript recency), the jaw drops with RMS amplitude and the whiskers lift with it, and the
+  // wind-up is a jaw chatter. The tail and the one-ear flick are idle motion on the frame counter,
+  // the same licence the rooster's comb wobble takes.
+  AVATARS.cat = (cx: any, cy: any, sc: any, t: any, state: any) => {
+    const listening = state === 'listening';
+    const bob = Math.sin(t / (listening ? 7 : 15)) * (listening ? 9 : 4);
+    const sway = Math.sin(t / 33) * 0.05;
+    const blink = ((t + 40) % 230) < 8;
+    let jaw = 0;
+    if (state === 'winding-up') {
+      const windAge = t - S.windUpStart;
+      jaw = windAge < 30 ? Math.abs(Math.sin(windAge / 3)) * 6 : 0;   // a chatter, as cats do
+    } else if (state === 'speaking') {
+      jaw = Math.min(S.amplitude * 120, 34);            // no idle floor — see rooster
+    }
+    const perk = listening ? 10 : 0;
+    const fp = t % 190;
+    const flick = fp < 12 ? Math.sin(fp / 12 * Math.PI) * 9 : 0;      // the right ear, now and then
+    const tri = (a: any, b: any, c: any, d: any, e: any, f: any) => {
+      ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(c, d); ctx.lineTo(e, f); ctx.closePath(); ctx.fill();
+    };
+    const FUR = '#f2a65a', DARK = '#d9823a', CREAM = '#fdebd3', PINK = '#f29fb0';
+
+    ctx.save();
+    ctx.translate(cx, cy + bob); ctx.rotate(sway); ctx.scale(sc, sc);
+    ctx.lineCap = 'round';
+
+    // tail, curled up beside the body; it swings faster while listening
+    const swing = Math.sin(t / (listening ? 6 : 20)) * (listening ? 16 : 7);
+    ctx.strokeStyle = DARK; ctx.lineWidth = 30;
+    ctx.beginPath(); ctx.moveTo(112, 232);
+    ctx.quadraticCurveTo(198 + swing * 0.4, 196, 172 + swing, 112); ctx.stroke();
+    ctx.strokeStyle = CREAM;                                          // pale tip
+    ctx.beginPath(); ctx.moveTo(172 + swing, 112); ctx.lineTo(172 + swing, 111); ctx.stroke();
+
+    // body behind the head, with a cream bib
+    ctx.fillStyle = FUR;
+    ctx.beginPath(); ctx.ellipse(0, 200, 150, 120, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = CREAM;
+    ctx.beginPath(); ctx.ellipse(0, 186, 66, 86, 0, 0, 7); ctx.fill();
+
+    // collar and bell
+    ctx.strokeStyle = '#3d7be0'; ctx.lineWidth = 14;
+    ctx.beginPath(); ctx.ellipse(0, 76, 76, 24, 0, 0.14 * Math.PI, 0.86 * Math.PI); ctx.stroke();
+    ctx.fillStyle = '#f5c518';
+    ctx.beginPath(); ctx.arc(0, 106, 13, 0, 7); ctx.fill();
+    ctx.fillStyle = '#8a6a00'; ctx.fillRect(-7, 106, 14, 3);
+
+    // ears — outer, then the pink inside; both lift while listening
+    ctx.fillStyle = FUR;
+    tri(-112, -70, -86, -156 - perk, -26, -118);
+    tri(112, -70, 86, -156 - perk - flick, 26, -118);
+    ctx.fillStyle = PINK;
+    tri(-97, -86, -83, -136 - perk, -48, -113);
+    tri(97, -86, 83, -136 - perk - flick, 48, -113);
+
+    // head, with cheek tufts
+    ctx.fillStyle = FUR;
+    ctx.beginPath(); ctx.ellipse(0, -30, 124, 106, 0, 0, 7); ctx.fill();
+    tri(-112, -8, -150, 22, -100, 40);
+    tri(112, -8, 150, 22, 100, 40);
+
+    // tabby stripes on the brow
+    ctx.fillStyle = DARK;
+    tri(-10, -135, 10, -135, 0, -92);
+    tri(-46, -127, -28, -131, -32, -95);
+    tri(46, -127, 28, -131, 32, -95);
+
+    // eyes — green, with slit pupils that widen when it is listening
+    for (const ex of [-48, 48]) {
+      if (!blink) {
+        const look = listening ? Math.sin(t / 18) * 6 : 0;
+        ctx.fillStyle = '#a8dc6e';
+        ctx.beginPath(); ctx.ellipse(ex, -44, 30, 29, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = '#0b0b10';
+        ctx.beginPath(); ctx.ellipse(ex + look, -44, listening ? 15 : 7, 23, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(ex + look + 7, -54, 5, 0, 7); ctx.fill();
+      } else {
+        ctx.strokeStyle = '#0b0b10'; ctx.lineWidth = 5;               // shut eyes curve, like a content cat
+        ctx.beginPath(); ctx.moveTo(ex - 26, -46); ctx.quadraticCurveTo(ex, -32, ex + 26, -46); ctx.stroke();
+      }
+    }
+
+    // muzzle; the chin drops with the jaw so the open mouth stays inside it
+    ctx.fillStyle = CREAM;
+    ctx.beginPath(); ctx.arc(-24, 30, 31, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(24, 30, 31, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, 52 + jaw * 0.5, 25, 16 + jaw * 0.3, 0, 0, 7); ctx.fill();
+
+    // mouth — shut, it is the cat's "w"; speaking, a jaw that opens with amplitude
+    if (jaw > 1) {
+      ctx.fillStyle = '#2a1a20';
+      ctx.beginPath(); ctx.ellipse(0, 40 + jaw * 0.5, 15 + jaw * 0.15, 4 + jaw * 0.5, 0, 0, 7); ctx.fill();
+      if (jaw > 9) {
+        ctx.fillStyle = '#e8788a';                                    // tongue
+        ctx.beginPath(); ctx.ellipse(0, 42 + jaw * 0.72, 9, 2 + jaw * 0.2, 0, 0, 7); ctx.fill();
+      }
+    }
+    ctx.strokeStyle = '#7a4a2a'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(0, 16); ctx.lineTo(0, 26); ctx.quadraticCurveTo(-4, 38, -20, 34);
+    ctx.moveTo(0, 26); ctx.quadraticCurveTo(4, 38, 20, 34); ctx.stroke();
+
+    // nose
+    ctx.fillStyle = '#e8788a';
+    tri(-13, 2, 13, 2, 0, 17);
+
+    // whiskers lift as it speaks
+    const lift = jaw * 0.35;
+    ctx.strokeStyle = '#fff6e8'; ctx.lineWidth = 3;
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath(); ctx.moveTo(side * 40, 24 + i * 9);
+        ctx.lineTo(side * 146, 6 + i * 19 - lift * (2 - i)); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  };
+
+  // Alien — a tall grey in silhouette, kept green: a great domed cranium that narrows to a small
+  // pointed chin, huge slanted eyes, a slit of a mouth, a thin neck and a slender bare body.
+  //
+  // It speaks telepathically, so the mouth never opens. Rings leave its head and travel outward,
+  // and each ring is as bright as the level was at the moment it left: the rings ARE the recent
+  // RMS history. Silence sends nothing, and a level channel that stalls shows as rings that stop
+  // leaving, which is the same honesty rule as the rooster's beak. A point on the brow brightens
+  // with the level, the aura behind the head holds faint while it is LISTENING, and the wind-up is
+  // that point and the aura flickering as it tunes in.
+  const alienWaves: any = { level: [], at: -1 };   // level per frame, newest first
+  AVATARS.alien = (cx: any, cy: any, sc: any, t: any, state: any) => {
+    const listening = state === 'listening';
+    const bob = Math.sin(t / (listening ? 7 : 15)) * (listening ? 9 : 4);
+    const sway = Math.sin(t / 33) * 0.05;
+    const blink = ((t + 120) % 270) < 8;
+    let glow = 0, send = 0;
+    if (state === 'winding-up') {
+      const windAge = t - S.windUpStart;
+      glow = windAge < 30 ? Math.abs(Math.sin(windAge / 2)) * 0.8 : 0;
+    } else if (state === 'speaking') {
+      send = Math.min(S.amplitude * 3, 1);              // no idle floor — see rooster
+      glow = send * 0.6;
+    } else if (listening) {
+      glow = 0.35;
+    }
+    if (t - alienWaves.at > 2) alienWaves.level.length = 0;             // not drawn lately: start clean
+    alienWaves.at = t;
+    alienWaves.level.unshift(send);
+    if (alienWaves.level.length > 40) alienWaves.level.pop();
+    const SKIN = '#7bd389', SHADE = '#5cbd77', LINE = '#2f7d4a';
+
+    ctx.save();
+    ctx.translate(cx, cy + bob); ctx.rotate(sway); ctx.scale(sc, sc);
+    ctx.lineCap = 'round';
+
+    // the aura, behind everything
+    if (glow > 0.02) {
+      ctx.fillStyle = 'rgba(150,255,185,' + (0.08 + glow * 0.24) + ')';
+      ctx.beginPath(); ctx.ellipse(0, -36, 156 + glow * 18, 150 + glow * 14, 0, 0, 7); ctx.fill();
+    }
+
+    // the message going out: one ring every 7 frames, 40 frames from the head to the edge of
+    // the band Meet shows, each at the brightness the level had when it left
+    ctx.lineWidth = 6;
+    for (let age = t % 7; age < alienWaves.level.length; age += 7) {
+      const level = alienWaves.level[age];
+      if (level < 0.03) continue;
+      const r = 150 + age * 2.3;
+      ctx.strokeStyle = 'rgba(170,255,200,' + (Math.min(0.95, level * 1.4) * (1 - age / 40)) + ')';
+      ctx.beginPath(); ctx.arc(0, -52, r, -0.6, 0.4); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, -52, r, Math.PI - 0.4, Math.PI + 0.6); ctx.stroke();
+    }
+
+    // slender bare body: thin arms, narrow sloping shoulders, long neck
+    ctx.strokeStyle = SHADE; ctx.lineWidth = 24;
+    for (const side of [-1, 1]) {
+      ctx.beginPath(); ctx.moveTo(side * 74, 160);
+      ctx.quadraticCurveTo(side * 106, 198, side * 100, 256); ctx.stroke();
+    }
+    ctx.fillStyle = SHADE;
+    ctx.beginPath(); ctx.moveTo(-16, 94); ctx.lineTo(16, 94); ctx.lineTo(20, 140);
+    ctx.quadraticCurveTo(84, 142, 88, 178); ctx.lineTo(70, 262); ctx.lineTo(-70, 262);
+    ctx.lineTo(-88, 178); ctx.quadraticCurveTo(-84, 142, -20, 140); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';                           // sheen down the chest
+    ctx.beginPath(); ctx.ellipse(0, 206, 32, 52, 0, 0, 7); ctx.fill();
+
+    // head — the domed cranium, then cheeks drawing in to a small chin
+    ctx.fillStyle = SKIN;
+    ctx.beginPath(); ctx.moveTo(0, -152);
+    ctx.bezierCurveTo(132, -152, 158, -60, 118, -6);
+    ctx.bezierCurveTo(88, 36, 40, 92, 0, 106);
+    ctx.bezierCurveTo(-40, 92, -88, 36, -118, -6);
+    ctx.bezierCurveTo(-158, -60, -132, -152, 0, -152); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.16)';                           // sheen on the dome
+    ctx.beginPath(); ctx.ellipse(-46, -104, 50, 22, -0.4, 0, 7); ctx.fill();
+
+    // where it sends from: a point on the brow, as bright as the level (or the wind-up flicker)
+    const point = Math.max(send, state === 'winding-up' ? glow : 0);
+    if (point > 0.03) {
+      ctx.fillStyle = 'rgba(225,255,235,' + (0.25 + point * 0.4) + ')';
+      ctx.beginPath(); ctx.arc(0, -96, 12 + point * 16, 0, 7); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,' + (0.5 + point * 0.5) + ')';
+      ctx.beginPath(); ctx.arc(0, -96, 5 + point * 4, 0, 7); ctx.fill();
+    }
+
+    // eyes — huge, black, wrapped round the head and slanted up at the outer corners
+    for (const side of [-1, 1]) {
+      ctx.save(); ctx.translate(side * 60, -18); ctx.rotate(side * -0.45);
+      if (!blink) {
+        const look = listening ? Math.sin(t / 18) * 6 : 0;
+        ctx.fillStyle = '#0b0b10';
+        ctx.beginPath(); ctx.ellipse(0, 0, 50, 29, 0, 0, 7); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(-12 + look, -10, 7, 0, 7); ctx.fill();
+        ctx.fillStyle = '#8b7bff';
+        ctx.beginPath(); ctx.arc(12 + look, 9, 4, 0, 7); ctx.fill();
+      } else {
+        ctx.strokeStyle = LINE; ctx.lineWidth = 6;
+        ctx.beginPath(); ctx.moveTo(-44, 0); ctx.quadraticCurveTo(0, 14, 44, 0); ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // nostrils, and a slit of a mouth that stays shut
+    ctx.fillStyle = LINE;
+    ctx.beginPath(); ctx.arc(-5, 48, 2.5, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(5, 48, 2.5, 0, 7); ctx.fill();
+    ctx.strokeStyle = LINE; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(-10, 71); ctx.quadraticCurveTo(0, 75, 10, 71); ctx.stroke();
+    ctx.restore();
+  };
+
+  // Dolphin — head and shoulders out of the water, front on. Head-on, a dolphin is only a dolphin
+  // by its dorsal fin, its bottle-nose beak and the smile line running back from it, so those are
+  // drawn large. Its signals: the lower jaw drops with RMS amplitude (and clicks on the wind-up,
+  // as dolphins do), a spout rises from the blowhole only as high as the level, and the flippers
+  // wave while it is LISTENING. The ripple is idle motion on the frame counter, like the comb.
+  AVATARS.dolphin = (cx: any, cy: any, sc: any, t: any, state: any) => {
+    const listening = state === 'listening';
+    const bob = Math.sin(t / (listening ? 7 : 15)) * (listening ? 9 : 4);
+    const sway = Math.sin(t / 33) * 0.05;
+    const blink = ((t + 170) % 250) < 8;
+    let jaw = 0, spout = 0;
+    if (state === 'winding-up') {
+      const windAge = t - S.windUpStart;
+      jaw = windAge < 30 ? Math.abs(Math.sin(windAge / 2)) * 6 : 0;      // clicks
+    } else if (state === 'speaking') {
+      jaw = Math.min(S.amplitude * 120, 30);            // no idle floor — see rooster
+      spout = Math.min(S.amplitude * 150, 40);
+    }
+    const flap = Math.sin(t / (listening ? 5 : 18)) * (listening ? 18 : 6);
+    const BLUE = '#5b9bd5', DEEP = '#3b78b8', BELLY = '#e8f3fc', LINE = '#28568a';
+
+    ctx.save();
+    ctx.translate(cx, cy + bob); ctx.rotate(sway); ctx.scale(sc, sc);
+    ctx.lineCap = 'round';
+
+    // spout from the blowhole: only while speaking, and only as tall as the level
+    if (spout > 2) {
+      ctx.fillStyle = '#bfe6ff';
+      for (let i = 0; i < 5; i++) {
+        const k = (i + 1) / 5;
+        ctx.beginPath(); ctx.arc(-46 - k * 16 + Math.sin(i * 2.1 + t / 6) * 6, -128 - spout * k, 7 - i, 0, 7); ctx.fill();
+      }
+    }
+
+    // dorsal fin behind the head, swept back
+    ctx.fillStyle = DEEP;
+    ctx.beginPath(); ctx.moveTo(-30, -118);
+    ctx.quadraticCurveTo(-4, -176, 46, -178);
+    ctx.quadraticCurveTo(20, -150, 34, -112); ctx.closePath(); ctx.fill();
+
+    // flippers behind the body; they wave while listening
+    for (const side of [-1, 1]) {
+      ctx.beginPath(); ctx.moveTo(side * 104, 120);
+      ctx.quadraticCurveTo(side * 186, 112 - flap, side * 204, 164 - flap * 1.4);
+      ctx.quadraticCurveTo(side * 160, 166, side * 108, 178); ctx.closePath(); ctx.fill();
+    }
+
+    // body with a pale belly, then the head
+    ctx.fillStyle = BLUE;
+    ctx.beginPath(); ctx.ellipse(0, 205, 138, 125, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = BELLY;
+    ctx.beginPath(); ctx.ellipse(0, 214, 84, 108, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = BLUE;
+    ctx.beginPath(); ctx.ellipse(0, -28, 124, 106, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';                           // sheen on the melon
+    ctx.beginPath(); ctx.ellipse(-28, -92, 54, 24, -0.3, 0, 7); ctx.fill();
+
+    // eyes, small and set wide, just above the corners of the smile
+    for (const ex of [-68, 68]) {
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.ellipse(ex, -34, 19, blink ? 3 : 20, 0, 0, 7); ctx.fill();
+      if (!blink) {
+        const look = listening ? Math.sin(t / 18) * 5 : 0;
+        ctx.fillStyle = '#0b0b10';
+        ctx.beginPath(); ctx.arc(ex + look, -32, 11, 0, 7); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(ex + look + 4, -37, 4, 0, 7); ctx.fill();
+      } else {
+        ctx.strokeStyle = '#0b0b10'; ctx.lineWidth = 5;
+        ctx.beginPath(); ctx.moveTo(ex - 16, -34); ctx.lineTo(ex + 16, -34); ctx.stroke();
+      }
+    }
+
+    // the beak: ONE rounded shape pointing at the viewer, split by the smile line — the head's
+    // blue above it, pale below. Earlier tries drew the two jaws as separate ovals with a pale
+    // chin patch behind, which read as a muzzle with a beard, and its open mouth as a dark box.
+    // The lower half drops with amplitude; the gap it opens follows the same curve as the smile.
+    const smile = (dy: any) => { ctx.moveTo(-44, 30 + dy); ctx.quadraticCurveTo(0, 52 + dy, 44, 30 + dy); };
+    if (jaw > 1) {
+      ctx.fillStyle = '#1d3550';                                        // inside the mouth
+      ctx.beginPath(); smile(0); ctx.lineTo(44, 30 + jaw); ctx.quadraticCurveTo(0, 52 + jaw, -44, 30 + jaw);
+      ctx.closePath(); ctx.fill();
+      if (jaw > 9) {
+        ctx.fillStyle = '#f08fa0';                                      // tongue
+        ctx.beginPath(); ctx.ellipse(0, 43 + jaw * 0.66, 15, jaw * 0.24, 0, 0, 7); ctx.fill();
+      }
+    }
+    ctx.fillStyle = '#e3f0fa';                                          // lower jaw
+    ctx.beginPath(); smile(jaw); ctx.ellipse(0, 28 + jaw, 44, 36, 0, 0.05, Math.PI - 0.05);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#4c8ccd';                                          // upper jaw
+    ctx.beginPath(); smile(0); ctx.ellipse(0, 28, 44, 36, 0, 0.05, Math.PI - 0.05, true);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    ctx.beginPath(); ctx.ellipse(-13, 8, 15, 7, -0.2, 0, 7); ctx.fill();
+    // the smile itself, across the beak and on back, turning up toward each eye
+    ctx.strokeStyle = LINE; ctx.lineWidth = 4;
+    ctx.beginPath(); smile(0); ctx.stroke();
+    for (const side of [-1, 1]) {
+      ctx.beginPath(); ctx.moveTo(side * 44, 30); ctx.quadraticCurveTo(side * 66, 30, side * 84, 6); ctx.stroke();
+    }
+
+    // the water it stands in, in front of the body
+    const rip = Math.sin(t / 16) * 4;
+    ctx.fillStyle = '#2a6fb0';
+    ctx.beginPath(); ctx.ellipse(0, 232, 212 + rip, 34, 0, 0, 7); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.ellipse(0, 226, 156 - rip, 15, 0, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
+    ctx.restore();
+  };
+
   // Background only. A real registry entry rather than a guard at the draw call, so the console
   // lists it, the contact sheet renders it, and an unknown-name typo still throws (#60). The
   // backgrounds assume a character owns the middle of the frame; with none selected that room is
@@ -401,7 +754,8 @@ export function installHud(): void {
   // which is why it is now one option rather than the only one.
   BACKGROUNDS.transcript = (t: any, state: any, hot: any) => {
     ctx.textAlign = 'center';
-    ctx.fillStyle = hot ? 'rgba(124,226,139,0.9)' : 'rgba(90,90,112,0.9)';
+    // The name in its own colour, the one the console shows it in; faded once they have gone quiet.
+    ctx.fillStyle = S.speaker ? speakerColor(S.speaker, hot ? 0.95 : 0.55) : 'rgba(90,90,112,0.9)';
     ctx.fillText(clipFit((S.speaker || 'listening…').toUpperCase(),
                          'bold 36px system-ui, sans-serif'), W / 2, 52);
 
@@ -456,7 +810,7 @@ export function installHud(): void {
     ctx.textAlign = 'left';
     ctx.fillStyle = 'rgba(255,255,255,0.30)'; ctx.font = '18px system-ui, sans-serif';
     ctx.fillText('SPEAKER', CX0, 258);
-    ctx.fillStyle = S.speaker ? '#ffffff' : dim; ctx.font = 'bold 30px system-ui, sans-serif';
+    ctx.fillStyle = S.speaker ? speakerColor(S.speaker) : dim; ctx.font = 'bold 30px system-ui, sans-serif';
     ctx.fillText(clipCol(S.speaker || 'nobody yet', 'bold 30px system-ui, sans-serif'), CX0, 296);
 
     // Outbound audio: the bar only moves when TTS PCM is actually flowing, so a dead speak path
@@ -715,9 +1069,10 @@ export function installHud(): void {
     stream,
     set(title: any, sub: any) { S.title = title || S.title;
                                const n = sub || ''; if (n !== S.sub) S.subAt = S.frames; S.sub = n; },
-    version: 'hud-v9-safearea',
+    version: 'hud-v12-telepathy',
     avatars: () => Object.keys(AVATARS),
     backgrounds: () => Object.keys(BACKGROUNDS),
+    speakerColor,
     hud(patch: any) {
       // Validate here, not in draw(): an unknown name is a caller error and must surface at the
       // act that made it. Throwing names the valid set, because the failure people actually hit
@@ -829,7 +1184,7 @@ export function createCameraController(page: Page): CameraController {
       // HUD edits become hot too (no rejoin), matching the Node-side surfaces.
       const stale = await page.evaluate(() => {
         const g: any = globalThis as any;
-        if (g.__vexaCam && g.__vexaCam.version === 'hud-v9-safearea') return false;
+        if (g.__vexaCam && g.__vexaCam.version === 'hud-v12-telepathy') return false;
         try { delete g.__vexaCam; } catch { g.__vexaCam = undefined; }
         return true;
       }).catch(() => false);

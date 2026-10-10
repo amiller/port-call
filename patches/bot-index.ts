@@ -36,6 +36,7 @@ import { launchBrowser, startCaptureBridge, startRecording, createSpeakControlle
 import { type ScreenShareController } from './screen-share.js';
 import { type SelfCheck } from './selfcheck.js';
 import { type ChatController } from './chat.js';
+import { createOptOut, optOutLevel } from './optout.js';
 import { createCameraController, type CameraController } from './camera.js';
 import { type ReactionController } from './reactions.js';
 import { statSync } from 'node:fs';
@@ -232,6 +233,9 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
   });
   const transcript: TranscriptSink = {
     async publish(seg) {
+      // The one place every transcript line passes: someone who opted out in the chat (optout.ts)
+      // is cut here, before the HUD, redis and the database, so nothing downstream can keep it.
+      if (optOutLevel(seg.speaker)) return;
       // Only COMPLETED segments reach the HUD: vexa resubmits each utterance as a growing window,
       // so provisional ones would make the on-camera text stutter and rewrite itself.
       try { if (seg.completed) hudLine?.(seg.speaker, seg.text); } catch { /* HUD is never critical */ }
@@ -266,13 +270,32 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
     // undefined and startCaptureBridge is called exactly as before.
     const tap = createCaptureTap(inv.meeting_id ?? inv.nativeMeetingId ?? 'x', (m) => console.log(`[bot] ${m}`));
     const sess = session, bp = botPipeline, rec = recording;
+    let chatWatcher: { stop(): void } | null = null;
     pipeline = {
       async start() {
         stopCapture = await startCaptureBridge(sess.page, inv, bp, tap);   // on the live meeting page
         if (rec) stopRecording = await startRecording(sess.page, inv, rec);   // MediaRecorder → recording.v1
         await bp.start();
+        // The room's one way to talk back: an opt-out typed in the chat (optout.ts). Loaded like
+        // an act's controller, so a chat.ts fix lands on the next spawn; and a failure to start
+        // it is said out loud and costs the meeting nothing else.
+        try {
+          const m = await surface('chat');
+          const optout = createOptOut({
+            publish: (seg) => transcript.publish(seg),
+            post: (text) => m.createChatController(sess.page).post(text),
+            botName: inv.botName,
+          });
+          chatWatcher = m.createChatWatcher(sess.page, (msg: { sender: string; text: string }) => {
+            void optout.onChat(msg.sender, msg.text)
+              .catch((e) => console.error(`[optout] failed to apply a chat command: ${String(e)}`));
+          });
+        } catch (e) {
+          console.error(`[optout] chat watcher did not start — opt-outs typed in the chat are NOT honoured: ${String(e)}`);
+        }
       },
       async stop() {
+        chatWatcher?.stop(); chatWatcher = null;
         const sc = stopCapture; stopCapture = async () => {};
         await sc().catch(() => { /* best-effort */ });
         const sr = stopRecording; stopRecording = async () => {};

@@ -72,7 +72,11 @@ try {
   // The oracle that matters: the controller's OWN output must not carry Meet's hover UI.
   const line = logs.filter((l) => l.startsWith('[chat] ') && l.includes('messages')).pop() || '';
   const clean = line.includes('surface bench probe') && !line.includes('Pin message');
-  clean ? ok('chat_read', 'controller output clean of hover UI') : bad('chat_read', line.slice(0, 120));
+  // And the sender: our own message sits under a time-only header, which must read as "You" —
+  // the climb that found it must not run on into the panel (2026-10-09, every opt-out unread).
+  const sender = line.includes('"sender":"You"');
+  clean && sender ? ok('chat_read', 'controller output clean of hover UI, sender read')
+    : bad('chat_read', line.slice(0, 160));
 } catch (e) { bad('chat_read', e.message); }
 
 // ── camera ──────────────────────────────────────────────────────────────────────────────────
